@@ -205,6 +205,17 @@ class TestCanvasOverhaul(unittest.TestCase):
         self.assertTrue(self.canvas_panel.is_widget_visible(btn1))
         self.assertFalse(self.canvas_panel.is_widget_visible(btn2))
 
+        # Simulate click on tab 2
+        class Tab2ClickEvent:
+            x = (tab2_rect[1] + tab2_rect[3]) // 2
+            y = (tab2_rect[2] + tab2_rect[4]) // 2
+            state = 0
+
+        self.canvas_panel._on_mouse_down(Tab2ClickEvent())
+        self.assertEqual(self.canvas_panel.get_active_tab(nb), "tab_2")
+        self.assertTrue(self.canvas_panel.is_widget_visible(btn2))
+        self.assertFalse(self.canvas_panel.is_widget_visible(btn1))
+
     def test_render_all_42_widgets(self):
         """Requirement 5: Verify distinct visual mockups for all 42 catalog widgets render cleanly."""
         catalog_types = list(WIDGET_CATALOG.keys())

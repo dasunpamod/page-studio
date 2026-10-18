@@ -14,7 +14,7 @@ Includes a search/filter entry at the top to quickly filter widgets by name in r
 import tkinter as tk
 from tkinter import ttk
 from typing import Dict, List, Callable, Optional, Set
-from ..core.models import WIDGET_CATALOG, WidgetTypeSpec
+from ..core.models import WIDGET_CATALOG
 from ..ui.theme import (
     COLOR_BG_PANEL,
     COLOR_BG_DARK,

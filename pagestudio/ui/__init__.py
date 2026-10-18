@@ -9,6 +9,7 @@ from .menu_editor import MenuEditorDialog, MenuItemSpec, MenuBarSpec
 from .notebook_editor import NotebookTabEditorDialog
 from .treeview_editor import TreeviewColumnEditorDialog
 from .font_chooser import FontChooserDialog
+from .theme import apply_theme
 
 __all__ = [
     "PageStudioApp",
@@ -23,4 +24,5 @@ __all__ = [
     "NotebookTabEditorDialog",
     "TreeviewColumnEditorDialog",
     "FontChooserDialog",
+    "apply_theme",
 ]

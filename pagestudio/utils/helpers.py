@@ -4,7 +4,6 @@ Handles platform differences (macOS Command key vs Windows/Linux Ctrl, font defa
 """
 
 import sys
-from typing import Tuple
 
 IS_MAC = sys.platform == "darwin"
 IS_WINDOWS = sys.platform.startswith("win")
@@ -25,6 +24,7 @@ def point_in_rect(px: int, py: int, rx: int, ry: int, rw: int, rh: int) -> bool:
     return rx <= px <= rx + rw and ry <= py <= ry + rh
 
 def clamp(val: int, min_val: int, max_val: int) -> int:
+    """Clamp integer val to range [min_val, max_val]."""
     return max(min_val, min(val, max_val))
 
 

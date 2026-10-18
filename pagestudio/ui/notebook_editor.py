@@ -7,7 +7,6 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Optional, Callable, Dict, Any, List
 import copy
-import uuid
 
 from ..core.models import WidgetInstance
 from ..core.state import ProjectState

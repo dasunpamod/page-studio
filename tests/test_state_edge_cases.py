@@ -6,8 +6,7 @@ hierarchy validation, deep copying, Z-order, and serialization.
 import unittest
 import tempfile
 import os
-import copy
-from typing import List, Dict, Any
+from typing import List
 
 from pagestudio.core.models import (
     WidgetInstance,

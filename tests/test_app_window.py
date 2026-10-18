@@ -9,7 +9,6 @@ from tkinter import ttk
 from unittest.mock import patch
 
 from pagestudio.ui.app_window import PageStudioApp
-from pagestudio.ui.widget_tree import WidgetTree
 from pagestudio.ui.palette import PALETTE_SECTIONS
 from pagestudio.core.models import WidgetInstance, WIDGET_CATALOG
 

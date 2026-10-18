@@ -14,7 +14,7 @@ import atexit
 from typing import Optional, Set
 from ..core.state import ProjectState
 from ..core.generator import CodeGenerator
-from ..ui.theme import COLOR_BG_PANEL, COLOR_ACCENT, FONT_UI_FAMILY, FONT_CODE_FAMILY
+from ..ui.theme import COLOR_BG_PANEL, FONT_UI_FAMILY, FONT_CODE_FAMILY
 
 PREVIEW_DIR = os.path.join(tempfile.gettempdir(), "pagestudio_preview")
 _active_processes: Set[subprocess.Popen] = set()
@@ -148,16 +148,18 @@ class CodePreviewPanel(tk.Frame):
 
     def _terminate_active_proc(self):
         """Terminates any actively running preview subprocess."""
-        if self._active_proc and self._active_proc.poll() is None:
-            try:
-                self._active_proc.terminate()
+        if self._active_proc:
+            if self._active_proc.poll() is None:
                 try:
-                    self._active_proc.wait(timeout=1)
-                except subprocess.TimeoutExpired:
-                    self._active_proc.kill()
-            except Exception:
-                pass
-        self._active_proc = None
+                    self._active_proc.terminate()
+                    try:
+                        self._active_proc.wait(timeout=1)
+                    except subprocess.TimeoutExpired:
+                        self._active_proc.kill()
+                except Exception:
+                    pass
+            _active_processes.discard(self._active_proc)
+            self._active_proc = None
 
     def run_test_gui(self):
         """Generates preview files and launches the live GUI in a test subprocess."""
@@ -167,13 +169,23 @@ class CodePreviewPanel(tk.Frame):
         try:
             os.makedirs(PREVIEW_DIR, exist_ok=True)
             gui_path, support_path = CodeGenerator.generate_all(self.state, self.app_name, PREVIEW_DIR)
-            proc = subprocess.Popen([sys.executable, gui_path])
+            proc = subprocess.Popen([sys.executable, gui_path], shell=False)
             self._active_proc = proc
             _active_processes.add(proc)
         except Exception as e:
             messagebox.showerror("Execution Error", f"Failed to launch test GUI:\n{e}")
 
+    def cleanup(self):
+        """Explicitly terminates any active preview subprocess and removes temp files."""
+        self._terminate_active_proc()
+        _cleanup_preview()
+
     def destroy(self):
         """Cleanup process when panel is destroyed."""
         self._terminate_active_proc()
         super().destroy()
+
+def cleanup_preview():
+    """Module-level cleanup helper for terminating subprocesses and removing preview directory."""
+    _cleanup_preview()
+

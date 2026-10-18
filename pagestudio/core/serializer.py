@@ -5,7 +5,7 @@ Encodes and decodes PageStudio projects to/from human-readable JSON files (.pgpr
 
 import json
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from .state import ProjectState
 from .models import WidgetInstance, MenuBarSpec
 
@@ -46,26 +46,46 @@ class ProjectSerializer:
         if data.get("format") and data.get("format") != "pagestudio":
             raise ValueError(f"Invalid file format: {data.get('format')}")
 
-        win = data.get("window") or {}
+        win = data.get("window") if isinstance(data.get("window"), dict) else {}
+        title = str(win.get("title")) if win.get("title") is not None else "My Application"
+        try:
+            width = int(win.get("width")) if win.get("width") is not None else 600
+        except (ValueError, TypeError):
+            width = 600
+        try:
+            height = int(win.get("height")) if win.get("height") is not None else 400
+        except (ValueError, TypeError):
+            height = 400
+        width = max(100, min(10000, width))
+        height = max(100, min(10000, height))
+
         state = ProjectState(
-            title=win.get("title", "My Application"),
-            width=win.get("width", 600),
-            height=win.get("height", 400)
+            title=title,
+            width=width,
+            height=height
         )
-        state.resizable_x = win.get("resizable_x", True)
-        state.resizable_y = win.get("resizable_y", True)
+        state.resizable_x = bool(win.get("resizable_x", True))
+        state.resizable_y = bool(win.get("resizable_y", True))
         
-        cv = data.get("canvas") or {}
-        state.grid_size = cv.get("grid_size", 10)
-        state.snap_to_grid = cv.get("snap_to_grid", True)
-        state.is_relative_mode = cv.get("is_relative_mode", False)
+        cv = data.get("canvas") if isinstance(data.get("canvas"), dict) else {}
+        try:
+            grid_size = int(cv.get("grid_size", 10)) if cv.get("grid_size") is not None else 10
+        except (ValueError, TypeError):
+            grid_size = 10
+        state.grid_size = max(1, min(100, grid_size))
+        state.snap_to_grid = bool(cv.get("snap_to_grid", True))
+        state.is_relative_mode = bool(cv.get("is_relative_mode", False))
         
-        state.menus = {k: MenuBarSpec.from_dict(v) for k, v in (data.get("menus") or {}).items()}
-        state.popup_menus = {k: MenuBarSpec.from_dict(v) for k, v in (data.get("popup_menus") or {}).items()}
+        menus_dict = data.get("menus") if isinstance(data.get("menus"), dict) else {}
+        popup_dict = data.get("popup_menus") if isinstance(data.get("popup_menus"), dict) else {}
+        state.menus = {k: MenuBarSpec.from_dict(v) for k, v in menus_dict.items() if isinstance(v, dict)}
+        state.popup_menus = {k: MenuBarSpec.from_dict(v) for k, v in popup_dict.items() if isinstance(v, dict)}
 
         state.widgets.clear()
         state.widget_order.clear()
         for wdata in (data.get("widgets") or []):
+            if not isinstance(wdata, dict):
+                continue
             widget = WidgetInstance.from_dict(wdata)
             state.widgets[widget.id] = widget
             state.widget_order.append(widget.id)
@@ -107,5 +127,11 @@ class ProjectSerializer:
     @classmethod
     def load_from_file(cls, file_path: str) -> ProjectState:
         with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            content = f.read().strip()
+            if not content:
+                raise ValueError("Project file is empty.")
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Corrupted or invalid JSON project file: {e}")
         return cls.from_dict(data)

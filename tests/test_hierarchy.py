@@ -7,8 +7,6 @@ Validates:
 """
 
 import unittest
-import tkinter as tk
-from typing import Optional, List, Dict, Any
 
 from pagestudio.core.models import WidgetInstance, WIDGET_CATALOG
 from pagestudio.core.state import ProjectState

@@ -17,7 +17,6 @@ from ..ui.theme import (
     COLOR_BG_DARK,
     COLOR_TEXT_MAIN,
     COLOR_TEXT_MUTED,
-    COLOR_ACCENT,
     FONT_UI_FAMILY
 )
 from ..utils.helpers import IS_MAC, get_platform_shortcut

@@ -78,6 +78,7 @@ class MenuBarSpec:
 
 @dataclass
 class WidgetTypeSpec:
+    """Specification schema for a widget type in the PageStudio catalog."""
     type_name: str
     display_name: str
     category: str
@@ -647,23 +648,79 @@ class WidgetInstance:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "WidgetInstance":
+        uid = str(data.get("id") or uuid.uuid4().hex[:8])
+        wtype = str(data.get("widget_type") or "Label")
+        name = str(data.get("name") or f"{wtype.lower()}_{uid}")
+
+        try:
+            raw_x = int(data.get("x", 0)) if data.get("x") is not None else 0
+        except (ValueError, TypeError):
+            raw_x = 0
+        try:
+            raw_y = int(data.get("y", 0)) if data.get("y") is not None else 0
+        except (ValueError, TypeError):
+            raw_y = 0
+        try:
+            raw_w = int(data.get("width", 100)) if data.get("width") is not None else 100
+        except (ValueError, TypeError):
+            raw_w = 100
+        try:
+            raw_h = int(data.get("height", 30)) if data.get("height") is not None else 30
+        except (ValueError, TypeError):
+            raw_h = 30
+
+        # Clamping and normalization: coordinates non-negative and sane maximum; dimensions positive (min 10px if zero/negative)
+        x = max(0, min(10000, raw_x))
+        y = max(0, min(10000, raw_y))
+        width = 10 if raw_w <= 0 else min(10000, raw_w)
+        height = 10 if raw_h <= 0 else min(10000, raw_h)
+
+        rel_x = None
+        if data.get("rel_x") is not None:
+            try:
+                rel_x = max(0.0, min(1.0, float(data["rel_x"])))
+            except (ValueError, TypeError):
+                rel_x = None
+
+        rel_y = None
+        if data.get("rel_y") is not None:
+            try:
+                rel_y = max(0.0, min(1.0, float(data["rel_y"])))
+            except (ValueError, TypeError):
+                rel_y = None
+
+        rel_width = None
+        if data.get("rel_width") is not None:
+            try:
+                rel_width = max(0.01, min(1.0, float(data["rel_width"])))
+            except (ValueError, TypeError):
+                rel_width = None
+
+        rel_height = None
+        if data.get("rel_height") is not None:
+            try:
+                rel_height = max(0.01, min(1.0, float(data["rel_height"])))
+            except (ValueError, TypeError):
+                rel_height = None
+
         return cls(
-            id=data["id"],
-            widget_type=data["widget_type"],
-            name=data["name"],
-            x=data.get("x", 0),
-            y=data.get("y", 0),
-            width=data.get("width", 100),
-            height=data.get("height", 30),
-            properties=copy.deepcopy(data.get("properties") or {}),
-            events=copy.deepcopy(data.get("events") or {}),
+            id=uid,
+            widget_type=wtype,
+            name=name,
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            properties=copy.deepcopy(data.get("properties") if isinstance(data.get("properties"), dict) else {}),
+            events=copy.deepcopy(data.get("events") if isinstance(data.get("events"), dict) else {}),
             parent_id=data.get("parent_id"),
-            rel_x=data.get("rel_x"),
-            rel_y=data.get("rel_y"),
-            rel_width=data.get("rel_width"),
-            rel_height=data.get("rel_height"),
-            is_relative=data.get("is_relative", False),
-            locked=data.get("locked", False),
-            z_order=data.get("z_order", 0),
+            rel_x=rel_x,
+            rel_y=rel_y,
+            rel_width=rel_width,
+            rel_height=rel_height,
+            is_relative=bool(data.get("is_relative", False)),
+            locked=bool(data.get("locked", False)),
+            z_order=int(data.get("z_order", 0)) if isinstance(data.get("z_order"), (int, float)) else 0,
             container_tab_or_pane=data.get("container_tab_or_pane"),
         )
+

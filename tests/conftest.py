@@ -22,7 +22,7 @@ try:
         for attempt in range(5):
             try:
                 return _orig_tk_init(self, *args, **kwargs)
-            except _tkinter.TclError as e:
+            except _tkinter.TclError:
                 if attempt < 4:
                     time.sleep(0.05 * (attempt + 1))
                     continue

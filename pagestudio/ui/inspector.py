@@ -8,10 +8,10 @@ Organized into 6 collapsible sections matching PAGE specifications.
 import tkinter as tk
 from tkinter import ttk
 import tkinter.colorchooser as colorchooser
-from typing import Optional, Dict, Any, List, Callable
+from typing import Optional, Dict, Any, List
 from ..core.state import ProjectState
 from ..core.models import WidgetInstance, WIDGET_CATALOG
-from ..ui.theme import COLOR_BG_PANEL, COLOR_ACCENT, FONT_UI_FAMILY
+from ..ui.theme import COLOR_BG_PANEL, FONT_UI_FAMILY
 from .font_chooser import FontChooserDialog
 from .menu_editor import MenuEditorDialog
 from .notebook_editor import NotebookTabEditorDialog

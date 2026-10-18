@@ -11,7 +11,6 @@ Verifies all 6 collapsible sections:
 
 import unittest
 import tkinter as tk
-from tkinter import ttk
 from pagestudio.core.models import WidgetInstance
 from pagestudio.core.state import ProjectState
 from pagestudio.ui.inspector import PropertyInspector

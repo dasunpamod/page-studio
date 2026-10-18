@@ -8,7 +8,6 @@ along with Toolbar controls, Theme Switcher, Relative Mode Toggle, and native Me
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog
 import os
-import sys
 from typing import Optional
 
 from ..core.state import ProjectState
@@ -26,10 +25,6 @@ from ..ui.treeview_editor import TreeviewColumnEditorDialog
 from ..ui.theme import (
     apply_theme,
     COLOR_BG_DARK,
-    COLOR_BG_PANEL,
-    COLOR_TEXT_MAIN,
-    COLOR_TEXT_MUTED,
-    COLOR_ACCENT,
     FONT_UI_FAMILY
 )
 from ..utils.helpers import IS_MAC, get_platform_shortcut, is_text_editing

@@ -24,14 +24,11 @@ Verifies:
 import unittest
 import tkinter as tk
 from tkinter import ttk
-from typing import Optional
-
 from pagestudio.core.state import ProjectState
 from pagestudio.core.models import WidgetInstance
 from pagestudio.ui.canvas import DesignCanvas
 from pagestudio.ui.palette import WidgetPalette
 from pagestudio.ui.inspector import PropertyInspector
-from pagestudio.ui.app_window import PageStudioApp
 from pagestudio.ui.menu_editor import MenuEditorDialog
 from pagestudio.ui.notebook_editor import NotebookTabEditorDialog
 from pagestudio.ui.treeview_editor import TreeviewColumnEditorDialog

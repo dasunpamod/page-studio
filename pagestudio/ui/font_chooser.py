@@ -7,7 +7,7 @@ Uses standard library tkinter/ttk and tkinter.font with zero dependencies.
 import tkinter as tk
 from tkinter import ttk
 import tkinter.font as tkfont
-from typing import Optional, Callable, Tuple, Any, List, Union
+from typing import Optional, Callable, Tuple, Any, List
 
 from ..ui.theme import (
     COLOR_BG_DARK,

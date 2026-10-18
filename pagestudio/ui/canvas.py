@@ -8,7 +8,7 @@ lock badges, color previews, and distinct renderers for all 42 widgets.
 import sys
 import tkinter as tk
 from tkinter import ttk
-from typing import Optional, Dict, Tuple, List, Any
+from typing import Optional, Dict, Tuple, List
 from ..core.state import ProjectState
 from ..core.models import WidgetInstance, WIDGET_CATALOG
 from ..ui.theme import (

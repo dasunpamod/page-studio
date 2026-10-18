@@ -6,7 +6,6 @@ TreeviewColumnEditorDialog, and FontChooserDialog in a virtual Tk environment.
 
 import unittest
 import tkinter as tk
-from tkinter import ttk
 from typing import Optional, List, Dict, Any
 
 from pagestudio.core.models import WidgetInstance
