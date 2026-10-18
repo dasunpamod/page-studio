@@ -21,6 +21,27 @@ Legacy PAGE was built on top of late-1990s Visual Tcl (`vTcl`) and spawned multi
 
 ---
 
+## Quick Start & One-Click Launching
+
+You do **not** need to open a terminal or type commands to use PageStudio!
+
+### On Windows
+* **Desktop Shortcut**: Double-click the **PageStudio** shortcut on your Desktop.
+* **Double-Click in Explorer**: Double-click `PageStudio.pyw` or `PageStudio.bat` in the project folder. PageStudio starts immediately without opening a black command prompt window!
+* *(To recreate your Desktop shortcut at any time, simply double-click `Create_Desktop_Shortcut.bat`)*
+
+### On macOS
+* **Double-Click in Finder**: Double-click `PageStudio.command` directly in Finder.
+* **Native Mac App**: Run `./create_mac_app.sh` once in your terminal to create `PageStudio.app`. You can then drag `PageStudio.app` into your **Applications** folder or Dock and click it like any native Mac app!
+
+### Terminal (Optional)
+If you prefer the command line:
+```bash
+python main.py
+```
+
+---
+
 ## Complete Catalog of 42 Widgets
 
 PageStudio includes full visual mockups, property inspection, and code generation for **42 distinct widget types** across four functional categories:
