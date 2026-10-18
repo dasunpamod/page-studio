@@ -216,6 +216,59 @@ class TestPropertyInspector(unittest.TestCase):
         self.inspector._on_prop_change(tv, "columns", [{"id": "c1", "heading": "Name"}])
         self.assertEqual(tv.properties["columns"], [{"id": "c1", "heading": "Name"}])
 
+    def test_scroll_reset_on_selection_change(self):
+        """Inspector resets scroll position to top when selection changes."""
+        paned = WidgetInstance.create("TPanedwindow", 10, 10, name_hint="my_paned")
+        self.state.add_widget(paned)
+        self.root.update_idletasks()
+
+        # Simulate user scrolling down
+        self.inspector.canvas.yview_moveto(0.5)
+
+        # Select a different widget (e.g. Progressbar)
+        prog = WidgetInstance.create("Progressbar", 10, 200, name_hint="my_prog")
+        self.state.add_widget(prog)
+        self.root.update_idletasks()
+
+        # Verify scroll position was reset to 0.0
+        y_pos = self.inspector.canvas.yview()[0]
+        self.assertAlmostEqual(y_pos, 0.0, places=2)
+
+    def test_in_place_geometry_update_during_drag(self):
+        """During dragging, inspector updates coordinate entries in place without rebuilding DOM."""
+        btn = WidgetInstance.create("Button", 40, 50, name_hint="drag_btn")
+        self.state.add_widget(btn)
+        self.root.update_idletasks()
+
+        initial_children = self.inspector.content.winfo_children()
+        child_count_before = len(initial_children)
+
+        # Simulate drag movement
+        self.state.update_widget_geometry(btn.id, 160, 220, 120, 40, commit=False)
+
+        # Verify child widgets were NOT destroyed and recreated
+        self.assertEqual(len(self.inspector.content.winfo_children()), child_count_before)
+        # Verify geometry entries reflect new position in place
+        self.assertEqual(self.inspector._geom_vars["x"].get(), "160")
+        self.assertEqual(self.inspector._geom_vars["y"].get(), "220")
+
+    def test_add_listener_no_duplicates(self):
+        """Registering the same state listener multiple times does not create duplicates."""
+        called = [0]
+        def dummy_listener():
+            called[0] += 1
+
+        initial_len = len(self.state._listeners)
+        self.state.add_listener(dummy_listener)
+        self.assertEqual(len(self.state._listeners), initial_len + 1)
+
+        # Add again - should not duplicate
+        self.state.add_listener(dummy_listener)
+        self.assertEqual(len(self.state._listeners), initial_len + 1)
+
+        self.state.notify()
+        self.assertEqual(called[0], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

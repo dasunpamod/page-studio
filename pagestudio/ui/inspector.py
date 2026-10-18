@@ -27,6 +27,11 @@ class PropertyInspector(tk.Frame):
         self.state = state
         self._updating: bool = False
 
+        self._active_widget_id: Optional[str] = None
+        self._active_is_relative: Optional[bool] = None
+        self._geom_vars: Dict[str, tk.StringVar] = {}
+        self._last_canvas_width: Optional[int] = None
+
         # Persistent collapse/expand states across refreshes
         self.section_expanded: Dict[str, bool] = {
             "identification": True,
@@ -72,7 +77,7 @@ class PropertyInspector(tk.Frame):
 
         self.canvas.bind(
             "<Configure>",
-            lambda e: self.canvas.itemconfig(self._canvas_window, width=e.width)
+            self._on_canvas_configure
         )
 
         self.canvas.pack(side="left", fill="both", expand=True)
@@ -89,6 +94,11 @@ class PropertyInspector(tk.Frame):
         self.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
         self.bind_all("<Button-4>", self._on_linux_scroll_up, add="+")
         self.bind_all("<Button-5>", self._on_linux_scroll_down, add="+")
+
+    def _on_canvas_configure(self, event):
+        if self._last_canvas_width != event.width:
+            self._last_canvas_width = event.width
+            self.canvas.itemconfig(self._canvas_window, width=event.width)
 
     def _is_mouse_over(self) -> bool:
         try:
@@ -120,20 +130,56 @@ class PropertyInspector(tk.Frame):
         if self._is_mouse_over():
             self.canvas.yview_scroll(1, "units")
 
-
     def _update_scroll_region(self):
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        bbox = self.canvas.bbox("all")
+        if bbox:
+            self.canvas.configure(scrollregion=bbox)
+
+    def _update_geometry_fields(self, w: Optional[WidgetInstance]):
+        if not w or not hasattr(self, "_geom_vars") or not self._geom_vars:
+            return
+        if w.is_relative:
+            if "rel_x" in self._geom_vars and w.rel_x is not None:
+                self._geom_vars["rel_x"].set(f"{w.rel_x:.4f}")
+            if "rel_y" in self._geom_vars and w.rel_y is not None:
+                self._geom_vars["rel_y"].set(f"{w.rel_y:.4f}")
+            if "rel_width" in self._geom_vars and w.rel_width is not None:
+                self._geom_vars["rel_width"].set(f"{w.rel_width:.4f}")
+            if "rel_height" in self._geom_vars and w.rel_height is not None:
+                self._geom_vars["rel_height"].set(f"{w.rel_height:.4f}")
+        else:
+            if "x" in self._geom_vars:
+                self._geom_vars["x"].set(str(w.x))
+            if "y" in self._geom_vars:
+                self._geom_vars["y"].set(str(w.y))
+            if "width" in self._geom_vars:
+                self._geom_vars["width"].set(str(w.width))
+            if "height" in self._geom_vars:
+                self._geom_vars["height"].set(str(w.height))
 
     def refresh(self):
         """Rebuilds property form fields based on active selection."""
         if self._updating:
             return
 
+        selected = self.state.get_selected_widget()
+        selected_id = selected.id if selected else None
+        is_rel = selected.is_relative if selected else self.state.is_relative_mode
+
+        # If currently in drag mode and the same widget is selected, only update geometry fields
+        if getattr(self.state, "is_dragging", False) and selected_id == self._active_widget_id and is_rel == self._active_is_relative:
+            self._update_geometry_fields(selected)
+            return
+
+        is_new_selection = (selected_id != self._active_widget_id) or (is_rel != self._active_is_relative)
+        self._active_widget_id = selected_id
+        self._active_is_relative = is_rel
+        self._geom_vars.clear()
+
         # Clear existing fields
         for widget in self.content.winfo_children():
             widget.destroy()
 
-        selected = self.state.get_selected_widget()
         if selected:
             self.header_label.config(text=f"PROPERTIES: {selected.widget_type.upper()}")
             self._render_widget_inspector(selected)
@@ -141,8 +187,10 @@ class PropertyInspector(tk.Frame):
             self.header_label.config(text="WINDOW SETTINGS")
             self._render_window_inspector()
 
-        self.content.update_idletasks()
         self._update_scroll_region()
+
+        if is_new_selection:
+            self.canvas.yview_moveto(0.0)
 
     # --------------------------------------------------------------------------
     # Collapsible Section Component
@@ -192,7 +240,6 @@ class PropertyInspector(tk.Frame):
             else:
                 arrow_lbl.config(text="▶")
                 body_frame.pack_forget()
-            self.content.update_idletasks()
             self._update_scroll_region()
 
         header_bar.bind("<Button-1>", _toggle)
@@ -378,15 +425,23 @@ class PropertyInspector(tk.Frame):
             ry_str = f"{w.rel_y:.4f}" if w.rel_y is not None else "0.0000"
             rw_str = f"{w.rel_width:.4f}" if w.rel_width is not None else "0.0000"
             rh_str = f"{w.rel_height:.4f}" if w.rel_height is not None else "0.0000"
-            self._add_entry(body, "Rel X", rx_str, lambda val: self._on_rel_geom_change(w, "rel_x", val))
-            self._add_entry(body, "Rel Y", ry_str, lambda val: self._on_rel_geom_change(w, "rel_y", val))
-            self._add_entry(body, "Rel Width", rw_str, lambda val: self._on_rel_geom_change(w, "rel_width", val))
-            self._add_entry(body, "Rel Height", rh_str, lambda val: self._on_rel_geom_change(w, "rel_height", val))
+            e_rx = self._add_entry(body, "Rel X", rx_str, lambda val: self._on_rel_geom_change(w, "rel_x", val))
+            e_ry = self._add_entry(body, "Rel Y", ry_str, lambda val: self._on_rel_geom_change(w, "rel_y", val))
+            e_rw = self._add_entry(body, "Rel Width", rw_str, lambda val: self._on_rel_geom_change(w, "rel_width", val))
+            e_rh = self._add_entry(body, "Rel Height", rh_str, lambda val: self._on_rel_geom_change(w, "rel_height", val))
+            self._geom_vars["rel_x"] = getattr(e_rx, "_string_var", None)
+            self._geom_vars["rel_y"] = getattr(e_ry, "_string_var", None)
+            self._geom_vars["rel_width"] = getattr(e_rw, "_string_var", None)
+            self._geom_vars["rel_height"] = getattr(e_rh, "_string_var", None)
         else:
-            self._add_entry(body, "X", str(w.x), lambda val: self._on_geom_change(w, "x", val))
-            self._add_entry(body, "Y", str(w.y), lambda val: self._on_geom_change(w, "y", val))
-            self._add_entry(body, "Width", str(w.width), lambda val: self._on_geom_change(w, "width", val))
-            self._add_entry(body, "Height", str(w.height), lambda val: self._on_geom_change(w, "height", val))
+            e_x = self._add_entry(body, "X", str(w.x), lambda val: self._on_geom_change(w, "x", val))
+            e_y = self._add_entry(body, "Y", str(w.y), lambda val: self._on_geom_change(w, "y", val))
+            e_w = self._add_entry(body, "Width", str(w.width), lambda val: self._on_geom_change(w, "width", val))
+            e_h = self._add_entry(body, "Height", str(w.height), lambda val: self._on_geom_change(w, "height", val))
+            self._geom_vars["x"] = getattr(e_x, "_string_var", None)
+            self._geom_vars["y"] = getattr(e_y, "_string_var", None)
+            self._geom_vars["width"] = getattr(e_w, "_string_var", None)
+            self._geom_vars["height"] = getattr(e_h, "_string_var", None)
 
         # Anchor dropdown
         anchors = ["nw", "n", "ne", "w", "center", "e", "sw", "s", "se"]
@@ -658,6 +713,7 @@ class PropertyInspector(tk.Frame):
 
         entry.bind("<FocusOut>", lambda e: on_change(var.get()))
         entry.bind("<Return>", lambda e: (on_change(var.get()), entry.select_range(0, "end")))
+        entry._string_var = var
         return entry
 
     def _add_readonly_text(self, parent, label_text: str, current_val: str):

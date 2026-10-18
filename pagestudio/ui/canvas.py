@@ -1201,10 +1201,11 @@ class DesignCanvas(tk.Frame):
 
     def _on_mouse_up(self, event):
         if self.drag_mode:
-            self.state.push_state()
             self.drag_mode = None
             self.active_handle = None
             self.orig_geom.clear()
+            self.state.is_dragging = False
+            self.state.push_state()
 
     def _on_mouse_hover(self, event):
         if self.drag_mode or self.pending_widget_type:

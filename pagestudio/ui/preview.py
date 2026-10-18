@@ -130,6 +130,8 @@ class CodePreviewPanel(tk.Frame):
 
     def update_code(self):
         """Regenerates live code and updates the preview text boxes."""
+        if getattr(self.state, "is_dragging", False):
+            return
         try:
             gui_code = CodeGenerator.generate_gui_code(self.state, self.app_name, f"{self.app_name}_support")
             sup_code = CodeGenerator.generate_support_code(self.state, self.app_name)

@@ -43,17 +43,28 @@ class ProjectState:
         # Selection
         self.selected_ids: List[str] = []
         
-        # Undo / Redo history
+        # History and notifications
         self._undo_stack: List[Dict[str, Any]] = []
         self._redo_stack: List[Dict[str, Any]] = []
         self._listeners: List[Callable[[], None]] = []
+        self.is_dragging: bool = False
         
         # Save initial state snapshot
         self._record_snapshot()
 
     def add_listener(self, listener: Callable[[], None]) -> None:
-        """Register a callback for when state changes."""
-        self._listeners.append(listener)
+        """Register a callback for when state changes without duplicates."""
+        if listener not in self._listeners:
+            self._listeners.append(listener)
+
+    def remove_listener(self, listener: Callable[[], None]) -> None:
+        """Unregister a callback."""
+        if listener in self._listeners:
+            self._listeners.remove(listener)
+
+    def clear_listeners(self) -> None:
+        """Remove all registered callbacks."""
+        self._listeners.clear()
 
     def notify(self) -> None:
         """Notify all listeners that the project state has updated."""
@@ -114,6 +125,7 @@ class ProjectState:
 
     def push_state(self) -> None:
         """Explicitly checkpoint current state for undo."""
+        self.is_dragging = False
         self._record_snapshot()
         self.notify()
 
@@ -301,8 +313,10 @@ class ProjectState:
             self.calculate_relative_coordinates(widget_id)
 
         if commit:
+            self.is_dragging = False
             self.push_state()
         else:
+            self.is_dragging = True
             self.notify()
 
     def duplicate_selected(self) -> List[str]:

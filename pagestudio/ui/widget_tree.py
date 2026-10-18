@@ -212,6 +212,8 @@ class WidgetTree(tk.Frame):
         """Re-populates the Treeview from the current project state."""
         if self._is_syncing:
             return
+        if getattr(self.state, "is_dragging", False):
+            return
 
         # Record open state of nodes
         open_nodes = set()

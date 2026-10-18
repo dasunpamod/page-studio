@@ -135,9 +135,10 @@ class WidgetPalette(tk.Frame):
         self._content_window = self.canvas.create_window((0, 0), window=self.content, anchor="nw", width=200)
         self.canvas.configure(yscrollcommand=self.scrollbar.set)
 
+        self._last_canvas_width = None
         self.canvas.bind(
             "<Configure>",
-            lambda e: self.canvas.itemconfig(self._content_window, width=e.width)
+            self._on_canvas_configure
         )
 
         # Mouse wheel support across platforms (Windows, macOS, Linux)
@@ -157,6 +158,16 @@ class WidgetPalette(tk.Frame):
 
         # Build sections
         self._populate_sections()
+
+    def _on_canvas_configure(self, event):
+        if self._last_canvas_width != event.width:
+            self._last_canvas_width = event.width
+            self.canvas.itemconfig(self._content_window, width=event.width)
+
+    def _update_scroll_region(self):
+        bbox = self.canvas.bbox("all")
+        if bbox:
+            self.canvas.configure(scrollregion=bbox)
 
     def _is_mouse_over(self) -> bool:
         try:
