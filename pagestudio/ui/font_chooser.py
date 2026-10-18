@@ -44,13 +44,14 @@ class FontChooserDialog(tk.Toplevel):
         self.result: Optional[Tuple[str, int, str]] = None
 
         # Parse initial font parameters
-        family, size, bold, italic, underline = self._parse_font_spec(initial_font)
+        family, size, bold, italic, underline, overstrike = self._parse_font_spec(initial_font)
         self.current_family: str = family
         self.current_size: int = size
 
         self.bold_var = tk.BooleanVar(value=bold)
         self.italic_var = tk.BooleanVar(value=italic)
         self.underline_var = tk.BooleanVar(value=underline)
+        self.overstrike_var = tk.BooleanVar(value=overstrike)
         self.search_var = tk.StringVar()
         self.size_var = tk.StringVar(value=str(size))
 
@@ -107,9 +108,10 @@ class FontChooserDialog(tk.Toplevel):
         bold = False
         italic = False
         underline = False
+        overstrike = False
 
         if not spec:
-            return default_family, default_size, bold, italic, underline
+            return default_family, default_size, bold, italic, underline, overstrike
 
         if isinstance(spec, (tuple, list)):
             if len(spec) >= 1 and spec[0]:
@@ -124,7 +126,8 @@ class FontChooserDialog(tk.Toplevel):
                 bold = "bold" in style_str
                 italic = "italic" in style_str
                 underline = "underline" in style_str
-            return default_family, default_size, bold, italic, underline
+                overstrike = "overstrike" in style_str
+            return default_family, default_size, bold, italic, underline, overstrike
 
         if isinstance(spec, dict):
             fam = spec.get("family", default_family)
@@ -132,29 +135,29 @@ class FontChooserDialog(tk.Toplevel):
             b = spec.get("weight") == "bold" or spec.get("bold", False)
             i = spec.get("slant") == "italic" or spec.get("italic", False)
             u = bool(spec.get("underline", False))
-            return fam, sz, b, i, u
+            o = bool(spec.get("overstrike", False))
+            return fam, sz, b, i, u, o
 
         if isinstance(spec, str):
             tokens = spec.split()
             if tokens:
-                # Last token could be style or size
-                # Check for styles
                 lower_tokens = [t.lower() for t in tokens]
                 bold = "bold" in lower_tokens
                 italic = "italic" in lower_tokens
                 underline = "underline" in lower_tokens
+                overstrike = "overstrike" in lower_tokens
 
                 # Check for size integer
                 family_tokens = []
                 for t in tokens:
                     if t.isdigit():
                         default_size = int(t)
-                    elif t.lower() not in ("bold", "italic", "underline", "normal", "roman"):
+                    elif t.lower() not in ("bold", "italic", "underline", "overstrike", "normal", "roman"):
                         family_tokens.append(t)
                 if family_tokens:
                     default_family = " ".join(family_tokens)
 
-        return default_family, default_size, bold, italic, underline
+        return default_family, default_size, bold, italic, underline, overstrike
 
     def _build_ui(self):
         main_frame = tk.Frame(self, bg=COLOR_BG_DARK)
@@ -294,6 +297,7 @@ class FontChooserDialog(tk.Toplevel):
         self._add_style_check(checks_frame, "Bold", self.bold_var)
         self._add_style_check(checks_frame, "Italic", self.italic_var)
         self._add_style_check(checks_frame, "Underline", self.underline_var)
+        self._add_style_check(checks_frame, "Overstrike", self.overstrike_var)
 
         # --- LOWER SECTION: Live Preview ---
         preview_container = tk.Frame(main_frame, bg=COLOR_BG_PANEL, bd=1, relief="solid")
@@ -438,6 +442,8 @@ class FontChooserDialog(tk.Toplevel):
             styles.append("italic")
         if self.underline_var.get():
             styles.append("underline")
+        if self.overstrike_var.get():
+            styles.append("overstrike")
         return " ".join(styles) if styles else "normal"
 
     def _update_preview(self):
@@ -445,6 +451,7 @@ class FontChooserDialog(tk.Toplevel):
         weight = "bold" if self.bold_var.get() else "normal"
         slant = "italic" if self.italic_var.get() else "roman"
         underline = 1 if self.underline_var.get() else 0
+        overstrike = 1 if self.overstrike_var.get() else 0
 
         try:
             self.preview_font = tkfont.Font(
@@ -453,7 +460,8 @@ class FontChooserDialog(tk.Toplevel):
                 size=self.current_size,
                 weight=weight,
                 slant=slant,
-                underline=underline
+                underline=underline,
+                overstrike=overstrike
             )
             self.preview_label.config(font=self.preview_font)
         except Exception:

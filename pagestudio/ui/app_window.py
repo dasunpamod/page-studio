@@ -33,7 +33,7 @@ from ..utils.helpers import IS_MAC, get_platform_shortcut, is_text_editing
 class PageStudioApp:
     """Main Application Controller for PageStudio."""
 
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, initial_project: Optional[str] = None):
         self.root = root
         self.root.title("PageStudio - Modern Python GUI Builder")
         self.root.geometry("1280x840")
@@ -55,9 +55,13 @@ class PageStudioApp:
         # Wire state listeners
         self._wire_state_listeners()
 
-        # Initial render
-        self.canvas.render()
-        self.state.notify()
+        # If an initial project file was specified, load it
+        if initial_project and os.path.exists(initial_project):
+            self.load_project_file(initial_project)
+        else:
+            # Initial render
+            self.canvas.render()
+            self.state.notify()
 
     def _build_menus(self):
         menubar = tk.Menu(self.root)
@@ -453,6 +457,9 @@ class PageStudioApp:
         )
         if not path:
             return
+        self.load_project_file(path)
+
+    def load_project_file(self, path: str):
         try:
             self.state = ProjectSerializer.load_from_file(path)
             self._wire_state_listeners()

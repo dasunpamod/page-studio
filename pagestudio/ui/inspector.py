@@ -519,6 +519,10 @@ class PropertyInspector(tk.Frame):
         curr_cursor = w.properties.get("cursor", "arrow")
         self._add_dropdown(body, "Cursor", curr_cursor, cursors, lambda val: self._on_prop_change(w, "cursor", val))
 
+        # ttk Style Name (for themed widgets)
+        if w.widget_type.startswith("T") or w.widget_type in ("Combobox", "Progressbar", "Separator", "Treeview"):
+            self._add_entry(body, "Style", w.properties.get("style", ""), lambda val: self._on_prop_change(w, "style", val))
+
     # --- SECTION 4: TEXT & TYPOGRAPHY ---
     def _render_section_text(self, w: WidgetInstance):
         body = self._create_collapsible_section("text", "Text & Typography")

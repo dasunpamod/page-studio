@@ -437,6 +437,8 @@ class CodeGenerator:
             pass  # Menus are not placed using geometry managers
         else:
             is_rel = w.is_relative or (state.is_relative_mode if state else False)
+            anchor_val = w.properties.get("anchor")
+            anchor_arg = f', anchor="{anchor_val}"' if anchor_val and anchor_val != "nw" else ""
             if is_rel:
                 pw = state.widgets[w.parent_id].width if (state and w.parent_id and w.parent_id in state.widgets) else (state.width if state else 600)
                 ph = state.widgets[w.parent_id].height if (state and w.parent_id and w.parent_id in state.widgets) else (state.height if state else 400)
@@ -444,9 +446,9 @@ class CodeGenerator:
                 ry = float(w.rel_y if w.rel_y is not None else round(w.y / max(1, ph), 4))
                 rw = float(w.rel_width if w.rel_width is not None else round(w.width / max(1, pw), 4))
                 rh = float(w.rel_height if w.rel_height is not None else round(w.height / max(1, ph), 4))
-                lines.append(f'{target_ref}.place(relx={rx:.4f}, rely={ry:.4f}, relwidth={rw:.4f}, relheight={rh:.4f})')
+                lines.append(f'{target_ref}.place(relx={rx:.4f}, rely={ry:.4f}, relwidth={rw:.4f}, relheight={rh:.4f}{anchor_arg})')
             else:
-                lines.append(f'{target_ref}.place(x={w.x}, y={w.y}, width={w.width}, height={w.height})')
+                lines.append(f'{target_ref}.place(x={w.x}, y={w.y}, width={w.width}, height={w.height}{anchor_arg})')
 
         # Notebook tabs generation
         if w_type in ("TNotebook", "Notebook"):
