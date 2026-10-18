@@ -4,6 +4,32 @@
 > Design desktop user interfaces visually and generate clean, human-readable Python code instantly.  
 > **Zero external dependencies required** — works with 100% standard Python on Windows, macOS, and Linux.
 
+<div align="center">
+
+<br/>
+
+<a href="https://github.com/dasunpamod/page-studio/archive/refs/tags/v2.0.0.zip">
+  <img src="https://img.shields.io/badge/⚡_DOWNLOAD_PAGESTUDIO_v2.0.0_(ZIP)-238636?style=for-the-badge&logo=python&logoColor=white" height="60" alt="Download PageStudio v2.0.0">
+</a>
+&nbsp;&nbsp;
+<a href="https://github.com/dasunpamod/page-studio/releases/latest">
+  <img src="https://img.shields.io/badge/📦_VIEW_RELEASE_NOTES-1f6feb?style=for-the-badge&logo=github&logoColor=white" height="60" alt="Release Notes">
+</a>
+
+<br/><br/>
+
+[![Latest Release](https://img.shields.io/github/v/release/dasunpamod/page-studio?style=flat-square&color=success&label=Release)](https://github.com/dasunpamod/page-studio/releases/latest)
+![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue?style=flat-square&logo=python&logoColor=white)
+![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20(Standard%20Library)-brightgreen?style=flat-square)
+![Tests](https://img.shields.io/badge/Tests-153%20Passed-brightgreen?style=flat-square)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
+
+*No installation or `pip install` required — extract the .zip and double-click to launch!*
+
+<br/>
+
+</div>
+
 ---
 
 ## ⚡ How to Open (No Terminal Needed!)
