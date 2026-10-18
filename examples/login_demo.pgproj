@@ -1,0 +1,137 @@
+{
+  "format": "pagestudio",
+  "version": "1.0.0",
+  "window": {
+    "title": "User Login",
+    "width": 420,
+    "height": 280,
+    "resizable_x": false,
+    "resizable_y": false
+  },
+  "canvas": {
+    "grid_size": 10,
+    "snap_to_grid": true
+  },
+  "widgets": [
+    {
+      "id": "lbl_header",
+      "widget_type": "Label",
+      "name": "lbl_header",
+      "x": 40,
+      "y": 20,
+      "width": 340,
+      "height": 30,
+      "properties": {
+        "text": "Welcome to Account Login"
+      },
+      "events": {},
+      "parent_id": null
+    },
+    {
+      "id": "lbl_user",
+      "widget_type": "Label",
+      "name": "lbl_user",
+      "x": 40,
+      "y": 70,
+      "width": 100,
+      "height": 26,
+      "properties": {
+        "text": "Username:"
+      },
+      "events": {},
+      "parent_id": null
+    },
+    {
+      "id": "ent_user",
+      "widget_type": "Entry",
+      "name": "ent_user",
+      "x": 140,
+      "y": 70,
+      "width": 240,
+      "height": 28,
+      "properties": {
+        "text": "",
+        "variable": "ent_user_var"
+      },
+      "events": {},
+      "parent_id": null
+    },
+    {
+      "id": "lbl_pass",
+      "widget_type": "Label",
+      "name": "lbl_pass",
+      "x": 40,
+      "y": 120,
+      "width": 100,
+      "height": 26,
+      "properties": {
+        "text": "Password:"
+      },
+      "events": {},
+      "parent_id": null
+    },
+    {
+      "id": "ent_pass",
+      "widget_type": "Entry",
+      "name": "ent_pass",
+      "x": 140,
+      "y": 120,
+      "width": 240,
+      "height": 28,
+      "properties": {
+        "text": "",
+        "show": "*",
+        "variable": "ent_pass_var"
+      },
+      "events": {},
+      "parent_id": null
+    },
+    {
+      "id": "chk_remember",
+      "widget_type": "Checkbutton",
+      "name": "chk_remember",
+      "x": 140,
+      "y": 160,
+      "width": 160,
+      "height": 26,
+      "properties": {
+        "text": "Remember Me",
+        "variable": "chk_remember_var"
+      },
+      "events": {},
+      "parent_id": null
+    },
+    {
+      "id": "btn_login",
+      "widget_type": "Button",
+      "name": "btn_login",
+      "x": 140,
+      "y": 210,
+      "width": 110,
+      "height": 34,
+      "properties": {
+        "text": "Sign In"
+      },
+      "events": {
+        "command": "on_login_click"
+      },
+      "parent_id": null
+    },
+    {
+      "id": "btn_cancel",
+      "widget_type": "Button",
+      "name": "btn_cancel",
+      "x": 270,
+      "y": 210,
+      "width": 110,
+      "height": 34,
+      "properties": {
+        "text": "Cancel"
+      },
+      "events": {
+        "command": "on_cancel_click"
+      },
+      "parent_id": null
+    }
+  ]
+}
