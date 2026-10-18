@@ -16,6 +16,7 @@ from .font_chooser import FontChooserDialog
 from .menu_editor import MenuEditorDialog
 from .notebook_editor import NotebookTabEditorDialog
 from .treeview_editor import TreeviewColumnEditorDialog
+from ..utils.helpers import IS_MAC
 
 
 class PropertyInspector(tk.Frame):
@@ -77,16 +78,48 @@ class PropertyInspector(tk.Frame):
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
-        # Mousewheel scrolling
+        # Mousewheel scrolling across platforms (Windows, macOS, Linux)
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind("<Button-4>", self._on_linux_scroll_up)
+        self.canvas.bind("<Button-5>", self._on_linux_scroll_down)
+        self.content.bind("<MouseWheel>", self._on_mousewheel)
+        self.content.bind("<Button-4>", self._on_linux_scroll_up)
+        self.content.bind("<Button-5>", self._on_linux_scroll_down)
+
         self.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
+        self.bind_all("<Button-4>", self._on_linux_scroll_up, add="+")
+        self.bind_all("<Button-5>", self._on_linux_scroll_down, add="+")
+
+    def _is_mouse_over(self) -> bool:
+        try:
+            x, y = self.winfo_pointerxy()
+            widget_under = self.winfo_containing(x, y)
+            return widget_under is not None and (widget_under == self or str(widget_under).startswith(str(self)))
+        except Exception:
+            return False
 
     def _on_mousewheel(self, event):
-        # Only scroll if mouse is over inspector
-        x, y = self.winfo_pointerxy()
-        widget_under = self.winfo_containing(x, y)
-        if widget_under is not None and str(widget_under).startswith(str(self)):
-            delta = -1 if event.delta < 0 else 1
-            self.canvas.yview_scroll(-1 * delta, "units")
+        if not self._is_mouse_over():
+            return
+        if hasattr(event, "num") and event.num == 4:
+            self.canvas.yview_scroll(-1, "units")
+        elif hasattr(event, "num") and event.num == 5:
+            self.canvas.yview_scroll(1, "units")
+        elif hasattr(event, "delta") and event.delta:
+            if IS_MAC:
+                units = int(-1 * event.delta)
+            else:
+                units = int(-1 * (event.delta / 120)) if abs(event.delta) >= 120 else (-1 if event.delta > 0 else 1)
+            self.canvas.yview_scroll(units, "units")
+
+    def _on_linux_scroll_up(self, event):
+        if self._is_mouse_over():
+            self.canvas.yview_scroll(-1, "units")
+
+    def _on_linux_scroll_down(self, event):
+        if self._is_mouse_over():
+            self.canvas.yview_scroll(1, "units")
+
 
     def _update_scroll_region(self):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -276,7 +309,7 @@ class PropertyInspector(tk.Frame):
             if wid == w.id:
                 continue
             ospec = WIDGET_CATALOG.get(other.widget_type)
-            if ospec and ospec.is_container and other.id not in self.state.get_all_descendants(w.id):
+            if ospec and ospec.is_container and self.state.is_valid_parent(w.id, other.id):
                 label = f"{other.name} ({other.widget_type})"
                 container_options[label] = other.id
 
@@ -290,8 +323,10 @@ class PropertyInspector(tk.Frame):
         def on_parent_selected(selected_lbl: str):
             new_parent_id = container_options.get(selected_lbl)
             if w.parent_id != new_parent_id:
-                w.parent_id = new_parent_id
-                self.state.push_state()
+                try:
+                    self.state.set_widget_parent(w.id, new_parent_id)
+                except ValueError:
+                    pass
 
         self._add_dropdown(body, "Parent", current_label, list(container_options.keys()), on_parent_selected)
 

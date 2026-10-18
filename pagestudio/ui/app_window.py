@@ -32,7 +32,7 @@ from ..ui.theme import (
     COLOR_ACCENT,
     FONT_UI_FAMILY
 )
-from ..utils.helpers import IS_MAC, get_platform_shortcut
+from ..utils.helpers import IS_MAC, get_platform_shortcut, is_text_editing
 
 
 class PageStudioApp:
@@ -270,33 +270,32 @@ class PageStudioApp:
         )
         self.info_label.pack(side="right")
 
-    def _is_text_editing(self) -> bool:
-        """Returns True if the focused widget is a text input field."""
-        focus = self.root.focus_get()
-        return isinstance(focus, (tk.Entry, ttk.Entry, tk.Text, ttk.Combobox))
+    def _is_text_editing(self, event=None) -> bool:
+        """Returns True if the focused widget or event source is a text input field."""
+        return is_text_editing(self.root, event)
 
     def cut(self, event=None):
-        if self._is_text_editing():
+        if self._is_text_editing(event):
             return
         self.state.cut_selected()
 
     def copy(self, event=None):
-        if self._is_text_editing():
+        if self._is_text_editing(event):
             return
         self.state.copy_selected()
 
     def paste(self, event=None):
-        if self._is_text_editing():
+        if self._is_text_editing(event):
             return
         self.state.paste()
 
     def duplicate(self, event=None):
-        if self._is_text_editing():
+        if self._is_text_editing(event):
             return
         self.state.duplicate_selected()
 
     def delete_selected(self, event=None):
-        if self._is_text_editing():
+        if self._is_text_editing(event):
             return
         self.state.remove_selected()
 
@@ -311,11 +310,12 @@ class PageStudioApp:
         # Edit shortcuts
         self.root.bind_all(f"<{mod}-z>", lambda e: self.state.undo())
         self.root.bind_all(f"<{mod}-y>", lambda e: self.state.redo())
-        self.root.bind_all(f"<{mod}-x>", lambda e: self.cut())
-        self.root.bind_all(f"<{mod}-c>", lambda e: self.copy())
-        self.root.bind_all(f"<{mod}-v>", lambda e: self.paste())
-        self.root.bind_all(f"<{mod}-d>", lambda e: self.duplicate())
-        self.root.bind_all("<Delete>", lambda e: self.delete_selected())
+        self.root.bind_all(f"<{mod}-x>", lambda e: self.cut(e))
+        self.root.bind_all(f"<{mod}-c>", lambda e: self.copy(e))
+        self.root.bind_all(f"<{mod}-v>", lambda e: self.paste(e))
+        self.root.bind_all(f"<{mod}-d>", lambda e: self.duplicate(e))
+        self.root.bind_all("<Delete>", lambda e: self.delete_selected(e))
+        self.root.bind_all("<BackSpace>", lambda e: self.delete_selected(e))
 
         # Run & Export shortcuts
         self.root.bind_all(f"<{mod}-e>", lambda e: self.export_python_code())

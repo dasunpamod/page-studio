@@ -144,51 +144,52 @@ class CodeGenerator:
             'self.root.configure(menu=self.menubar)',
         ]
 
-        def emit_items(parent_menu_var: str, items: List[MenuItemSpec], prefix: str = "menu"):
-            for idx, item in enumerate(items):
-                itype = item.item_type
+        def emit_items(parent_menu_var: str, items: Any, prefix: str = "menu"):
+            for idx, raw_item in enumerate(items):
+                item = MenuItemSpec.from_dict(raw_item) if isinstance(raw_item, dict) else raw_item
+                itype = getattr(item, "item_type", "command")
                 if itype == "cascade":
-                    clean_lbl = cls.sanitize_identifier(item.label.lower() or f"cascade_{idx}")
+                    clean_lbl = cls.sanitize_identifier(getattr(item, "label", "").lower() or f"cascade_{idx}")
                     sub_var = f"self.{prefix}_{clean_lbl}"
                     lines.append(f'{sub_var} = tk.Menu({parent_menu_var}, tearoff=0)')
-                    under_arg = f', underline={item.underline}' if item.underline >= 0 else ''
+                    under_arg = f', underline={item.underline}' if getattr(item, "underline", -1) >= 0 else ''
                     lines.append(f'{parent_menu_var}.add_cascade(label="{item.label}", menu={sub_var}{under_arg})')
-                    emit_items(sub_var, item.children, f"{prefix}_{clean_lbl}")
+                    emit_items(sub_var, getattr(item, "children", []), f"{prefix}_{clean_lbl}")
                 elif itype == "command":
                     args = [f'label="{item.label}"']
-                    if item.command:
+                    if getattr(item, "command", None):
                         args.append(f'command=support.{cls.sanitize_identifier(item.command)}')
-                    if item.accelerator:
+                    if getattr(item, "accelerator", None):
                         args.append(f'accelerator="{item.accelerator}"')
-                    if item.underline >= 0:
+                    if getattr(item, "underline", -1) >= 0:
                         args.append(f'underline={item.underline}')
-                    if item.state and item.state != "normal":
+                    if getattr(item, "state", "normal") and item.state != "normal":
                         args.append(f'state="{item.state}"')
                     lines.append(f'{parent_menu_var}.add_command({", ".join(args)})')
                 elif itype == "separator":
                     lines.append(f'{parent_menu_var}.add_separator()')
                 elif itype == "checkbutton":
                     args = [f'label="{item.label}"']
-                    if item.variable:
+                    if getattr(item, "variable", None):
                         args.append(f'variable=support.{cls.sanitize_identifier(item.variable)}')
-                    if item.command:
+                    if getattr(item, "command", None):
                         args.append(f'command=support.{cls.sanitize_identifier(item.command)}')
-                    if item.accelerator:
+                    if getattr(item, "accelerator", None):
                         args.append(f'accelerator="{item.accelerator}"')
-                    if item.underline >= 0:
+                    if getattr(item, "underline", -1) >= 0:
                         args.append(f'underline={item.underline}')
                     lines.append(f'{parent_menu_var}.add_checkbutton({", ".join(args)})')
                 elif itype == "radiobutton":
                     args = [f'label="{item.label}"']
-                    if item.variable:
+                    if getattr(item, "variable", None):
                         args.append(f'variable=support.{cls.sanitize_identifier(item.variable)}')
-                    if item.value is not None:
+                    if getattr(item, "value", None) is not None:
                         args.append(f'value="{item.value}"')
-                    if item.command:
+                    if getattr(item, "command", None):
                         args.append(f'command=support.{cls.sanitize_identifier(item.command)}')
-                    if item.accelerator:
+                    if getattr(item, "accelerator", None):
                         args.append(f'accelerator="{item.accelerator}"')
-                    if item.underline >= 0:
+                    if getattr(item, "underline", -1) >= 0:
                         args.append(f'underline={item.underline}')
                     lines.append(f'{parent_menu_var}.add_radiobutton({", ".join(args)})')
 
@@ -384,6 +385,19 @@ class CodeGenerator:
             lines.append(f'self.{var_name} = tk.Toplevel({parent})')
             lines.append(f'self.{var_name}.title("{title}")')
 
+        elif w_type == "Popupmenu":
+            tearoff = w.properties.get("tearoff", 0)
+            lines.append(f'self.{var_name} = tk.Menu({parent}, tearoff={tearoff})')
+            lines.append(f'self.{var_name}.add_command(label="Item 1")')
+            lines.append(f'self.{var_name}.add_command(label="Item 2")')
+            lines.append(f'self.{var_name}.add_separator()')
+            lines.append(f'self.{var_name}.add_command(label="Item 3")')
+            lines.append(f'{parent}.bind("<Button-3>", lambda e: self.{var_name}.tk_popup(e.x_root, e.y_root))')
+
+        elif w_type == "Custom":
+            cls_name = w.properties.get("class_name") or "CustomWidget"
+            lines.append(f'self.{var_name} = getattr(support, "{cls_name}", ttk.Frame)({parent})')
+
         else:
             lines.append(f'self.{var_name} = ttk.Label({parent}, text="{w_type}")')
 
@@ -391,17 +405,22 @@ class CodeGenerator:
         target_ref = f"self.{var_name}_frame" if is_scrolled else f"self.{var_name}"
 
         # Relative vs Absolute Placement
-        is_rel = w.is_relative or (state.is_relative_mode if state else False)
-        if is_rel:
-            pw = state.widgets[w.parent_id].width if (state and w.parent_id and w.parent_id in state.widgets) else (state.width if state else 600)
-            ph = state.widgets[w.parent_id].height if (state and w.parent_id and w.parent_id in state.widgets) else (state.height if state else 400)
-            rx = w.rel_x if w.rel_x is not None else round(w.x / max(1, pw), 4)
-            ry = w.rel_y if w.rel_y is not None else round(w.y / max(1, ph), 4)
-            rw = w.rel_width if w.rel_width is not None else round(w.width / max(1, pw), 4)
-            rh = w.rel_height if w.rel_height is not None else round(w.height / max(1, ph), 4)
-            lines.append(f'{target_ref}.place(relx={rx:.4f}, rely={ry:.4f}, relwidth={rw:.4f}, relheight={rh:.4f})')
+        if w_type == "Toplevel":
+            lines.append(f'self.{var_name}.geometry("{w.width}x{w.height}+{w.x}+{w.y}")')
+        elif w_type == "Popupmenu":
+            pass  # Menus are not placed using geometry managers
         else:
-            lines.append(f'{target_ref}.place(x={w.x}, y={w.y}, width={w.width}, height={w.height})')
+            is_rel = w.is_relative or (state.is_relative_mode if state else False)
+            if is_rel:
+                pw = state.widgets[w.parent_id].width if (state and w.parent_id and w.parent_id in state.widgets) else (state.width if state else 600)
+                ph = state.widgets[w.parent_id].height if (state and w.parent_id and w.parent_id in state.widgets) else (state.height if state else 400)
+                rx = float(w.rel_x if w.rel_x is not None else round(w.x / max(1, pw), 4))
+                ry = float(w.rel_y if w.rel_y is not None else round(w.y / max(1, ph), 4))
+                rw = float(w.rel_width if w.rel_width is not None else round(w.width / max(1, pw), 4))
+                rh = float(w.rel_height if w.rel_height is not None else round(w.height / max(1, ph), 4))
+                lines.append(f'{target_ref}.place(relx={rx:.4f}, rely={ry:.4f}, relwidth={rw:.4f}, relheight={rh:.4f})')
+            else:
+                lines.append(f'{target_ref}.place(x={w.x}, y={w.y}, width={w.width}, height={w.height})')
 
         # Notebook tabs generation
         if w_type in ("TNotebook", "Notebook"):
@@ -455,15 +474,16 @@ class CodeGenerator:
                 var_specs[vname] = ("StringVar", str(w.properties.get("from_", 0)))
 
         # Also collect checkbutton / radiobutton variables from menus
-        def collect_menu_vars(items: List[MenuItemSpec]):
-            for item in items:
-                if item.item_type in ("checkbutton", "radiobutton") and item.variable:
+        def collect_menu_vars(items: Any):
+            for raw in items:
+                item = MenuItemSpec.from_dict(raw) if isinstance(raw, dict) else raw
+                if getattr(item, "item_type", "") in ("checkbutton", "radiobutton") and getattr(item, "variable", None):
                     vname = cls.sanitize_identifier(item.variable)
                     if item.item_type == "checkbutton":
                         var_specs[vname] = ("BooleanVar", False)
                     else:
-                        var_specs[vname] = ("StringVar", item.value or "1")
-                if item.children:
+                        var_specs[vname] = ("StringVar", getattr(item, "value", None) or "1")
+                if getattr(item, "children", None):
                     collect_menu_vars(item.children)
 
         for menu_spec in state.menus.values():
@@ -516,12 +536,13 @@ class CodeGenerator:
                     handlers.add((clean_h, is_event))
 
         # Also collect menu commands
-        def collect_menu_handlers(items: List[MenuItemSpec]):
-            for item in items:
-                if item.command:
+        def collect_menu_handlers(items: Any):
+            for raw in items:
+                item = MenuItemSpec.from_dict(raw) if isinstance(raw, dict) else raw
+                if getattr(item, "command", None):
                     clean_h = cls.sanitize_identifier(item.command)
                     handlers.add((clean_h, False))
-                if item.children:
+                if getattr(item, "children", None):
                     collect_menu_handlers(item.children)
 
         for menu_spec in state.menus.values():
@@ -560,7 +581,7 @@ class CodeGenerator:
             # Append only new missing callback stubs
             new_stubs = []
             for handler, is_event in sorted(handlers):
-                if f"def {handler}(" not in code:
+                if not re.search(rf"\bdef\s+{re.escape(handler)}\s*\(", code):
                     param = "event" if is_event else ""
                     new_stubs.extend([
                         '',

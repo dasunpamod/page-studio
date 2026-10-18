@@ -73,9 +73,9 @@ class ProjectState:
             "grid_size": self.grid_size,
             "snap_to_grid": self.snap_to_grid,
             "is_relative_mode": self.is_relative_mode,
-            "menus": {k: v.to_dict() for k, v in self.menus.items()},
-            "popup_menus": {k: v.to_dict() for k, v in self.popup_menus.items()},
-            "widgets": [w.to_dict() for w in [self.widgets[wid] for wid in self.widget_order if wid in self.widgets]],
+            "menus": copy.deepcopy({k: v.to_dict() for k, v in self.menus.items()}),
+            "popup_menus": copy.deepcopy({k: v.to_dict() for k, v in self.popup_menus.items()}),
+            "widgets": [copy.deepcopy(w.to_dict()) for w in [self.widgets[wid] for wid in self.widget_order if wid in self.widgets]],
             "selected_ids": list(self.selected_ids)
         }
 
@@ -89,17 +89,19 @@ class ProjectState:
         self.snap_to_grid = snapshot.get("snap_to_grid", self.snap_to_grid)
         self.is_relative_mode = snapshot.get("is_relative_mode", False)
         
-        self.menus = {k: MenuBarSpec.from_dict(v) for k, v in snapshot.get("menus", {}).items()}
-        self.popup_menus = {k: MenuBarSpec.from_dict(v) for k, v in snapshot.get("popup_menus", {}).items()}
+        self.menus = {k: MenuBarSpec.from_dict(copy.deepcopy(v)) for k, v in (snapshot.get("menus") or {}).items()}
+        self.popup_menus = {k: MenuBarSpec.from_dict(copy.deepcopy(v)) for k, v in (snapshot.get("popup_menus") or {}).items()}
         
         self.widgets = {}
         self.widget_order = []
-        for wdata in snapshot.get("widgets", []):
-            widget = WidgetInstance.from_dict(wdata)
+        for idx, wdata in enumerate(snapshot.get("widgets") or []):
+            widget = WidgetInstance.from_dict(copy.deepcopy(wdata))
+            widget.z_order = idx
             self.widgets[widget.id] = widget
             self.widget_order.append(widget.id)
             
-        self.selected_ids = [sid for sid in snapshot.get("selected_ids", []) if sid in self.widgets]
+        self._sync_z_orders()
+        self.selected_ids = [sid for sid in (snapshot.get("selected_ids") or []) if sid in self.widgets]
         self.notify()
 
     def _record_snapshot(self) -> None:
@@ -141,10 +143,55 @@ class ProjectState:
     # --------------------------------------------------------------------------
     # Widget & Hierarchy Operations
     # --------------------------------------------------------------------------
+    def is_valid_parent(self, widget_id: str, potential_parent_id: Optional[str]) -> bool:
+        """
+        Check if setting potential_parent_id as parent of widget_id would create
+        a self-reference or circular hierarchy loop. Returns False if invalid.
+        """
+        if potential_parent_id is None:
+            return True
+        if potential_parent_id == widget_id:
+            return False
+        if potential_parent_id not in self.widgets:
+            return False
+        # Walk up from potential_parent_id to check if widget_id is an ancestor
+        curr: Optional[str] = potential_parent_id
+        visited: Set[str] = set()
+        while curr is not None:
+            if curr == widget_id:
+                return False
+            if curr in visited:
+                break
+            visited.add(curr)
+            curr = self.widgets[curr].parent_id if curr in self.widgets else None
+        return True
+
+    def set_widget_parent(self, widget_id: str, new_parent_id: Optional[str]) -> None:
+        """
+        Reparent a widget to a new container (or root canvas if None).
+        Enforces circular hierarchy prevention and raises ValueError on violation.
+        """
+        if widget_id not in self.widgets:
+            raise ValueError(f"Widget '{widget_id}' not found in project state.")
+        if new_parent_id is not None:
+            if new_parent_id == widget_id:
+                raise ValueError(f"Cannot parent widget '{widget_id}' to itself.")
+            if new_parent_id not in self.widgets:
+                raise ValueError(f"Parent widget '{new_parent_id}' does not exist.")
+            if not self.is_valid_parent(widget_id, new_parent_id):
+                raise ValueError(f"Cannot parent widget '{widget_id}' to its descendant '{new_parent_id}' (circular hierarchy).")
+        self.widgets[widget_id].parent_id = new_parent_id
+        self.push_state()
+
     def add_widget(self, widget: WidgetInstance, parent_id: Optional[str] = None) -> None:
-        if parent_id is not None:
-            widget.parent_id = parent_id
-            
+        target_parent = parent_id if parent_id is not None else widget.parent_id
+        if target_parent is not None:
+            if target_parent == widget.id:
+                raise ValueError(f"Cannot parent widget '{widget.id}' to itself.")
+            if not self.is_valid_parent(widget.id, target_parent):
+                raise ValueError(f"Cannot parent widget '{widget.id}' to its descendant '{target_parent}' (circular hierarchy).")
+            widget.parent_id = target_parent
+
         # Snap coordinates if configured and not relative
         if self.snap_to_grid and self.grid_size > 1 and not widget.is_relative:
             widget.x = (widget.x // self.grid_size) * self.grid_size
@@ -153,6 +200,7 @@ class ProjectState:
         self.widgets[widget.id] = widget
         if widget.id not in self.widget_order:
             self.widget_order.append(widget.id)
+        self._sync_z_orders()
         self.selected_ids = [widget.id]
         if self.is_relative_mode:
             widget.is_relative = True
@@ -166,13 +214,18 @@ class ProjectState:
             if wid in self.widgets and self.widgets[wid].parent_id == parent_id
         ]
 
-    def get_all_descendants(self, parent_id: str) -> List[WidgetInstance]:
+    def get_all_descendants(self, parent_id: str, visited: Optional[Set[str]] = None) -> List[WidgetInstance]:
         """Return all descendants of the specified parent_id recursively."""
+        if visited is None:
+            visited = set()
+        visited.add(parent_id)
         descendants: List[WidgetInstance] = []
         direct_children = self.get_children(parent_id)
         for child in direct_children:
-            descendants.append(child)
-            descendants.extend(self.get_all_descendants(child.id))
+            if child.id not in visited:
+                visited.add(child.id)
+                descendants.append(child)
+                descendants.extend(self.get_all_descendants(child.id, visited))
         return descendants
 
     def remove_widget(self, widget_id: str) -> None:
@@ -187,6 +240,7 @@ class ProjectState:
                 self.widget_order.remove(wid)
             if wid in self.selected_ids:
                 self.selected_ids.remove(wid)
+        self._sync_z_orders()
         self.push_state()
 
     def remove_selected(self) -> None:
@@ -204,6 +258,7 @@ class ProjectState:
             if wid in self.widget_order:
                 self.widget_order.remove(wid)
         self.selected_ids.clear()
+        self._sync_z_orders()
         self.push_state()
 
     def select_widget(self, widget_id: Optional[str], additive: bool = False) -> None:
@@ -250,32 +305,21 @@ class ProjectState:
         else:
             self.notify()
 
-    def duplicate_selected(self) -> None:
+    def duplicate_selected(self) -> List[str]:
+        """Duplicates selected widgets and their descendants with offset."""
         if not self.selected_ids:
-            return
-        new_ids = []
-        for wid in self.selected_ids:
-            w = self.widgets.get(wid)
-            if not w:
-                continue
-            new_w = copy.deepcopy(w)
-            new_uid = str(uuid.uuid4())[:8]
-            new_w.id = new_uid
-            new_w.name = f"{w.widget_type.lower()}_{new_uid}"
-            new_w.x += 20
-            new_w.y += 20
-            self.widgets[new_uid] = new_w
-            self.widget_order.append(new_uid)
-            new_ids.append(new_uid)
-            
-        self.selected_ids = new_ids
-        self.push_state()
+            return []
+        saved_clipboard = copy.deepcopy(self._clipboard)
+        self.copy_selected()
+        new_ids = self.paste(offset=(20, 20))
+        self._clipboard = saved_clipboard
+        return new_ids
 
     # --------------------------------------------------------------------------
     # Clipboard & Locking Operations
     # --------------------------------------------------------------------------
     def copy_selected(self) -> None:
-        """Serialize selected widgets and all their descendants to clipboard."""
+        """Serialize selected widgets and all their descendants to clipboard with true deep copies."""
         if not self.selected_ids:
             return
         all_ids: List[str] = []
@@ -285,7 +329,7 @@ class ProjectState:
                 for desc in self.get_all_descendants(wid):
                     if desc.id not in all_ids:
                         all_ids.append(desc.id)
-        self._clipboard = [self.widgets[wid].to_dict() for wid in all_ids if wid in self.widgets]
+        self._clipboard = [copy.deepcopy(self.widgets[wid].to_dict()) for wid in all_ids if wid in self.widgets]
 
     def cut_selected(self) -> None:
         """Serialize selected widgets + descendants to clipboard and remove from project."""
@@ -318,6 +362,8 @@ class ProjectState:
             old_parent = cloned_data.get("parent_id")
             if old_parent in id_map:
                 cloned_data["parent_id"] = id_map[old_parent]
+            elif old_parent not in self.widgets:
+                cloned_data["parent_id"] = None
 
             # Offset positions
             cloned_data["x"] = cloned_data.get("x", 0) + offset[0]
@@ -334,6 +380,7 @@ class ProjectState:
             self.widgets[inst.id] = inst
             self.widget_order.append(inst.id)
 
+        self._sync_z_orders()
         # Select the newly pasted widgets
         self.selected_ids = [inst.id for inst in pasted_instances]
         self.push_state()
@@ -447,4 +494,84 @@ class ProjectState:
                 self.widgets[wid].is_relative = True
                 self.calculate_relative_coordinates(wid)
         self.push_state()
+
+    # --------------------------------------------------------------------------
+    # Z-Order (Stacking Order) Management
+    # --------------------------------------------------------------------------
+    def _sync_z_orders(self) -> None:
+        """Synchronizes z_order attribute on all widgets with their index in widget_order."""
+        for idx, wid in enumerate(self.widget_order):
+            if wid in self.widgets:
+                self.widgets[wid].z_order = idx
+
+    def bring_to_front(self, widget_id: str) -> None:
+        """Moves widget and all its descendants to the top of widget_order (Z-order)."""
+        if widget_id not in self.widgets or widget_id not in self.widget_order:
+            return
+        desc_ids = {d.id for d in self.get_all_descendants(widget_id)}
+        subtree = [wid for wid in self.widget_order if wid == widget_id or wid in desc_ids]
+        if not subtree:
+            return
+        for wid in subtree:
+            self.widget_order.remove(wid)
+        self.widget_order.extend(subtree)
+        self._sync_z_orders()
+        self.push_state()
+
+    def send_to_back(self, widget_id: str) -> None:
+        """Moves widget and all its descendants to the bottom of widget_order (Z-order)."""
+        if widget_id not in self.widgets or widget_id not in self.widget_order:
+            return
+        desc_ids = {d.id for d in self.get_all_descendants(widget_id)}
+        subtree = [wid for wid in self.widget_order if wid == widget_id or wid in desc_ids]
+        if not subtree:
+            return
+        for wid in subtree:
+            self.widget_order.remove(wid)
+        self.widget_order = subtree + self.widget_order
+        self._sync_z_orders()
+        self.push_state()
+
+    def bring_forward(self, widget_id: str) -> None:
+        """Moves widget and all its descendants one position forward past the next widget block."""
+        if widget_id not in self.widgets or widget_id not in self.widget_order:
+            return
+        desc_ids = {d.id for d in self.get_all_descendants(widget_id)}
+        subtree = [wid for wid in self.widget_order if wid == widget_id or wid in desc_ids]
+        last_subtree_idx = max(self.widget_order.index(wid) for wid in subtree)
+        if last_subtree_idx >= len(self.widget_order) - 1:
+            return  # Already at the front
+        next_wid = self.widget_order[last_subtree_idx + 1]
+        next_desc_ids = {d.id for d in self.get_all_descendants(next_wid)}
+        target_idx = max(self.widget_order.index(wid) for wid in [next_wid] + [wid for wid in self.widget_order if wid in next_desc_ids])
+        target_wid = self.widget_order[target_idx]
+
+        for wid in subtree:
+            self.widget_order.remove(wid)
+        insert_idx = self.widget_order.index(target_wid) + 1
+        self.widget_order[insert_idx:insert_idx] = subtree
+        self._sync_z_orders()
+        self.push_state()
+
+    def send_backward(self, widget_id: str) -> None:
+        """Moves widget and all its descendants one position backward past the preceding widget block."""
+        if widget_id not in self.widgets or widget_id not in self.widget_order:
+            return
+        desc_ids = {d.id for d in self.get_all_descendants(widget_id)}
+        subtree = [wid for wid in self.widget_order if wid == widget_id or wid in desc_ids]
+        first_subtree_idx = min(self.widget_order.index(wid) for wid in subtree)
+        if first_subtree_idx <= 0:
+            return  # Already at the back
+        prev_wid = self.widget_order[first_subtree_idx - 1]
+        prev_desc_ids = {d.id for d in self.get_all_descendants(prev_wid)}
+        target_idx = min(self.widget_order.index(wid) for wid in [prev_wid] + [wid for wid in self.widget_order if wid in prev_desc_ids])
+        target_wid = self.widget_order[target_idx]
+
+        for wid in subtree:
+            self.widget_order.remove(wid)
+        insert_idx = self.widget_order.index(target_wid)
+        self.widget_order[insert_idx:insert_idx] = subtree
+        self._sync_z_orders()
+        self.push_state()
+
 

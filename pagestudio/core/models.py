@@ -5,6 +5,7 @@ Defines supported widgets, menu models, default properties, dimensions, and geom
 
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
+import copy
 import uuid
 
 @dataclass
@@ -50,7 +51,7 @@ class MenuItemSpec:
             image=data.get("image"),
             state=data.get("state", "normal"),
             underline=data.get("underline", -1),
-            children=[cls.from_dict(c) for c in data.get("children", [])]
+            children=[cls.from_dict(c) for c in (data.get("children") or [])]
         )
 
 @dataclass
@@ -72,7 +73,7 @@ class MenuBarSpec:
         return cls(
             id=data.get("id", str(uuid.uuid4())[:8]),
             name=data.get("name", "main_menu"),
-            items=[MenuItemSpec.from_dict(item) for item in data.get("items", [])]
+            items=[MenuItemSpec.from_dict(item) for item in (data.get("items") or [])]
         )
 
 @dataclass
@@ -631,8 +632,8 @@ class WidgetInstance:
             "y": self.y,
             "width": self.width,
             "height": self.height,
-            "properties": dict(self.properties),
-            "events": dict(self.events),
+            "properties": copy.deepcopy(self.properties),
+            "events": copy.deepcopy(self.events),
             "parent_id": self.parent_id,
             "rel_x": self.rel_x,
             "rel_y": self.rel_y,
@@ -654,8 +655,8 @@ class WidgetInstance:
             y=data.get("y", 0),
             width=data.get("width", 100),
             height=data.get("height", 30),
-            properties=data.get("properties", {}),
-            events=data.get("events", {}),
+            properties=copy.deepcopy(data.get("properties") or {}),
+            events=copy.deepcopy(data.get("events") or {}),
             parent_id=data.get("parent_id"),
             rel_x=data.get("rel_x"),
             rel_y=data.get("rel_y"),

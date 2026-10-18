@@ -72,8 +72,12 @@ class FontChooserDialog(tk.Toplevel):
         except tk.TclError:
             pass
 
+        self.protocol("WM_DELETE_WINDOW", self._on_cancel_clicked)
+        self.bind("<Escape>", lambda e: self._on_cancel_clicked())
+
         if modal:
             self.wait_window(self)
+
 
     @classmethod
     def choose_font(
@@ -469,6 +473,13 @@ class FontChooserDialog(tk.Toplevel):
         style = self._build_style_string()
         return f"{self.current_family} {self.current_size} {style}".strip()
 
+    def destroy(self):
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        super().destroy()
+
     def _on_ok_clicked(self):
         self.result = self.font_tuple
         if self.on_save:
@@ -478,3 +489,4 @@ class FontChooserDialog(tk.Toplevel):
     def _on_cancel_clicked(self):
         self.result = None
         self.destroy()
+

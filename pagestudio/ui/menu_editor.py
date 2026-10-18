@@ -130,8 +130,12 @@ class MenuEditorDialog(tk.Toplevel):
         except tk.TclError:
             pass
 
+        self.protocol("WM_DELETE_WINDOW", self._on_cancel_clicked)
+        self.bind("<Escape>", lambda e: self._on_cancel_clicked())
+
         if modal:
             self.wait_window(self)
+
 
     @classmethod
     def edit_menu(
@@ -556,6 +560,13 @@ class MenuEditorDialog(tk.Toplevel):
                 self.selected_item_id = None
             self._populate_tree()
 
+    def destroy(self):
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        super().destroy()
+
     def _on_save_clicked(self):
         self.result = self.spec
         if self.on_save:
@@ -569,3 +580,4 @@ class MenuEditorDialog(tk.Toplevel):
     def _on_cancel_clicked(self):
         self.result = None
         self.destroy()
+

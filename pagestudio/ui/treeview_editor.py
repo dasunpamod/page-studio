@@ -69,8 +69,12 @@ class TreeviewColumnEditorDialog(tk.Toplevel):
         except tk.TclError:
             pass
 
+        self.protocol("WM_DELETE_WINDOW", self._on_cancel_clicked)
+        self.bind("<Escape>", lambda e: self._on_cancel_clicked())
+
         if modal:
             self.wait_window(self)
+
 
     @classmethod
     def edit_columns(
@@ -387,6 +391,13 @@ class TreeviewColumnEditorDialog(tk.Toplevel):
         self.selected_index = idx + 1
         self._populate_list()
 
+    def destroy(self):
+        try:
+            self.grab_release()
+        except Exception:
+            pass
+        super().destroy()
+
     def _on_save_clicked(self):
         self.result = [dict(c) for c in self.columns]
         if self.widget:
@@ -400,3 +411,4 @@ class TreeviewColumnEditorDialog(tk.Toplevel):
     def _on_cancel_clicked(self):
         self.result = None
         self.destroy()
+

@@ -26,3 +26,55 @@ def point_in_rect(px: int, py: int, rx: int, ry: int, rw: int, rh: int) -> bool:
 
 def clamp(val: int, min_val: int, max_val: int) -> int:
     return max(min_val, min(val, max_val))
+
+
+def is_text_editing(root_or_widget, event=None) -> bool:
+    """
+    Returns True if either the event's source widget or the currently focused
+    widget is a text editing control (Entry, Text, Spinbox, Combobox, etc.).
+    Guards global delete, backspace, and nudge shortcuts from interfering with text input.
+    """
+    import tkinter as tk
+    from tkinter import ttk
+
+    text_classes = (
+        tk.Entry, ttk.Entry,
+        tk.Text,
+        tk.Spinbox, ttk.Spinbox,
+        ttk.Combobox
+    )
+    # 1. Check event.widget if provided
+    if event is not None and hasattr(event, "widget") and event.widget is not None:
+        if isinstance(event.widget, text_classes):
+            return True
+        try:
+            w_class = event.widget.winfo_class()
+            if w_class in ("Entry", "TEntry", "Text", "Spinbox", "TSpinbox", "Combobox", "TCombobox"):
+                return True
+        except Exception:
+            pass
+
+    # 2. Check currently focused widget
+    try:
+        focused = None
+        if hasattr(root_or_widget, "focus_get"):
+            focused = root_or_widget.focus_get()
+        elif hasattr(root_or_widget, "winfo_toplevel"):
+            top = root_or_widget.winfo_toplevel()
+            if hasattr(top, "focus_get"):
+                focused = top.focus_get()
+
+        if focused is not None:
+            if isinstance(focused, text_classes):
+                return True
+            try:
+                w_class = focused.winfo_class()
+                if w_class in ("Entry", "TEntry", "Text", "Spinbox", "TSpinbox", "Combobox", "TCombobox"):
+                    return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return False
+

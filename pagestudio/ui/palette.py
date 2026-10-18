@@ -23,6 +23,8 @@ from ..ui.theme import (
     COLOR_TEXT_MUTED,
     FONT_UI_FAMILY
 )
+from ..utils.helpers import IS_MAC
+
 
 PALETTE_SECTIONS: Dict[str, List[str]] = {
     "Basic Controls": [
@@ -138,25 +140,53 @@ class WidgetPalette(tk.Frame):
             lambda e: self.canvas.itemconfig(self._content_window, width=e.width)
         )
 
-        # Mouse wheel support
-        def _on_mousewheel(event):
-            delta = -1 if event.delta < 0 else 1
-            if hasattr(event, "num") and event.num == 5:
-                delta = 1
-            elif hasattr(event, "num") and event.num == 4:
-                delta = -1
-            self.canvas.yview_scroll(delta * -1, "units")
+        # Mouse wheel support across platforms (Windows, macOS, Linux)
+        self.canvas.bind("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind("<Button-4>", self._on_linux_scroll_up)
+        self.canvas.bind("<Button-5>", self._on_linux_scroll_down)
+        self.content.bind("<MouseWheel>", self._on_mousewheel)
+        self.content.bind("<Button-4>", self._on_linux_scroll_up)
+        self.content.bind("<Button-5>", self._on_linux_scroll_down)
 
-        self.canvas.bind("<MouseWheel>", _on_mousewheel)
-        self.canvas.bind("<Button-4>", lambda e: self.canvas.yview_scroll(-1, "units"))
-        self.canvas.bind("<Button-5>", lambda e: self.canvas.yview_scroll(1, "units"))
-        self.content.bind("<MouseWheel>", _on_mousewheel)
+        self.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
+        self.bind_all("<Button-4>", self._on_linux_scroll_up, add="+")
+        self.bind_all("<Button-5>", self._on_linux_scroll_down, add="+")
 
         self.canvas.pack(side="left", fill="both", expand=True)
         self.scrollbar.pack(side="right", fill="y")
 
         # Build sections
         self._populate_sections()
+
+    def _is_mouse_over(self) -> bool:
+        try:
+            x, y = self.winfo_pointerxy()
+            widget_under = self.winfo_containing(x, y)
+            return widget_under is not None and (widget_under == self or str(widget_under).startswith(str(self)))
+        except Exception:
+            return False
+
+    def _on_mousewheel(self, event):
+        if not self._is_mouse_over():
+            return
+        if hasattr(event, "num") and event.num == 4:
+            self.canvas.yview_scroll(-1, "units")
+        elif hasattr(event, "num") and event.num == 5:
+            self.canvas.yview_scroll(1, "units")
+        elif hasattr(event, "delta") and event.delta:
+            if IS_MAC:
+                units = int(-1 * event.delta)
+            else:
+                units = int(-1 * (event.delta / 120)) if abs(event.delta) >= 120 else (-1 if event.delta > 0 else 1)
+            self.canvas.yview_scroll(units, "units")
+
+    def _on_linux_scroll_up(self, event):
+        if self._is_mouse_over():
+            self.canvas.yview_scroll(-1, "units")
+
+    def _on_linux_scroll_down(self, event):
+        if self._is_mouse_over():
+            self.canvas.yview_scroll(1, "units")
 
     def _populate_sections(self):
         placed_widgets: Set[str] = set()

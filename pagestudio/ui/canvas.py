@@ -5,6 +5,7 @@ coordinate mathematics, 8-point resize handles, interactive notebook tabs,
 lock badges, color previews, and distinct renderers for all 42 widgets.
 """
 
+import sys
 import tkinter as tk
 from tkinter import ttk
 from typing import Optional, Dict, Tuple, List, Any
@@ -15,7 +16,7 @@ from ..ui.theme import (
     COLOR_SELECTION, COLOR_HANDLE_FILL, COLOR_HANDLE_OUTLINE,
     FONT_UI_FAMILY
 )
-from ..utils.helpers import IS_MAC
+from ..utils.helpers import IS_MAC, is_text_editing
 
 HANDLE_SIZE = 8
 
@@ -83,11 +84,18 @@ class DesignCanvas(tk.Frame):
         self.canvas.bind("<ButtonRelease-1>", self._on_mouse_up)
         self.canvas.bind("<Motion>", self._on_mouse_hover)
 
-        # Mousewheel scrolling (vertical & horizontal)
+        # Mousewheel scrolling (vertical & horizontal across Windows, macOS, and Linux)
         self.canvas.bind("<MouseWheel>", self._on_mousewheel)
         self.canvas.bind("<Shift-MouseWheel>", self._on_shift_mousewheel)
         self.canvas.bind("<Button-4>", lambda e: self.canvas.yview_scroll(-1, "units"))
         self.canvas.bind("<Button-5>", lambda e: self.canvas.yview_scroll(1, "units"))
+        self.canvas.bind("<Shift-Button-4>", lambda e: self.canvas.xview_scroll(-1, "units"))
+        if not sys.platform.startswith("win"):
+            try:
+                self.canvas.bind("<Button-6>", lambda e: self.canvas.xview_scroll(-1, "units"))
+                self.canvas.bind("<Button-7>", lambda e: self.canvas.xview_scroll(1, "units"))
+            except tk.TclError:
+                pass
 
         # Keyboard shortcuts
         self.bind_all("<Delete>", self._on_delete_key)
@@ -99,17 +107,40 @@ class DesignCanvas(tk.Frame):
         self.bind_all("<Up>", lambda e: self._nudge_selected(0, -1, e))
         self.bind_all("<Down>", lambda e: self._nudge_selected(0, 1, e))
 
+    def _is_text_editing(self, event=None) -> bool:
+        """Returns True if the focused widget or event source is a text input field."""
+        return is_text_editing(self, event)
+
+    def _get_parent_container_dimensions(self, w: WidgetInstance) -> Tuple[int, int]:
+        """Returns (width, height) of the widget's parent container or the main canvas paper."""
+        if w.parent_id and w.parent_id in self.state.widgets:
+            parent = self.state.widgets[w.parent_id]
+            return parent.width, parent.height
+        return self.state.width, self.state.height
+
     def _on_mousewheel(self, event):
-        if IS_MAC:
-            self.canvas.yview_scroll(int(-1 * event.delta), "units")
-        else:
-            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        if hasattr(event, "num") and event.num == 4:
+            self.canvas.yview_scroll(-1, "units")
+        elif hasattr(event, "num") and event.num == 5:
+            self.canvas.yview_scroll(1, "units")
+        elif hasattr(event, "delta") and event.delta:
+            if IS_MAC:
+                units = int(-1 * event.delta)
+            else:
+                units = int(-1 * (event.delta / 120)) if abs(event.delta) >= 120 else (-1 if event.delta > 0 else 1)
+            self.canvas.yview_scroll(units, "units")
 
     def _on_shift_mousewheel(self, event):
-        if IS_MAC:
-            self.canvas.xview_scroll(int(-1 * event.delta), "units")
-        else:
-            self.canvas.xview_scroll(int(-1 * (event.delta / 120)), "units")
+        if hasattr(event, "num") and event.num in (4, 6):
+            self.canvas.xview_scroll(-1, "units")
+        elif hasattr(event, "num") and event.num in (5, 7):
+            self.canvas.xview_scroll(1, "units")
+        elif hasattr(event, "delta") and event.delta:
+            if IS_MAC:
+                units = int(-1 * event.delta)
+            else:
+                units = int(-1 * (event.delta / 120)) if abs(event.delta) >= 120 else (-1 if event.delta > 0 else 1)
+            self.canvas.xview_scroll(units, "units")
 
     def set_pending_placement(self, widget_type: Optional[str]):
         """Sets the widget type ready to be dropped on next canvas click."""
@@ -1042,6 +1073,7 @@ class DesignCanvas(tk.Frame):
     # --------------------------------------------------------------------------
 
     def _on_mouse_down(self, event):
+        self.canvas.focus_set()
         cx = int(self.canvas.canvasx(event.x))
         cy = int(self.canvas.canvasy(event.y))
 
@@ -1131,8 +1163,11 @@ class DesignCanvas(tk.Frame):
                 if not w or w.locked:
                     continue
                 ox, oy, ow, oh = self.orig_geom[wid]
-                new_x = max(0, ox + dx)
-                new_y = max(0, oy + dy)
+                max_cw, max_ch = self._get_parent_container_dimensions(w)
+                max_x = max(0, max_cw - ow)
+                max_y = max(0, max_ch - oh)
+                new_x = max(0, min(ox + dx, max_x))
+                new_y = max(0, min(oy + dy, max_y))
                 self.state.update_widget_geometry(wid, new_x, new_y, ow, oh, commit=False)
 
         elif self.drag_mode == "resize" and self.active_handle:
@@ -1142,20 +1177,25 @@ class DesignCanvas(tk.Frame):
             ox, oy, ow, oh = self.orig_geom[w.id]
             h = self.active_handle
 
+            max_cw, max_ch = self._get_parent_container_dimensions(w)
+            min_size = 15
+
             new_x, new_y, new_w, new_h = ox, oy, ow, oh
 
             if "e" in h:
-                new_w = max(15, ow + dx)
+                max_w = max(min_size, max_cw - ox)
+                new_w = max(min_size, min(ow + dx, max_w))
             if "s" in h:
-                new_h = max(15, oh + dy)
+                max_h = max(min_size, max_ch - oy)
+                new_h = max(min_size, min(oh + dy, max_h))
             if "w" in h:
-                constrained_dx = min(dx, ow - 15)
-                new_x = max(0, ox + constrained_dx)
-                new_w = ow - constrained_dx
+                right_edge = ox + ow
+                new_x = max(0, min(ox + dx, right_edge - min_size))
+                new_w = right_edge - new_x
             if "n" in h:
-                constrained_dy = min(dy, oh - 15)
-                new_y = max(0, oy + constrained_dy)
-                new_h = oh - constrained_dy
+                bottom_edge = oy + oh
+                new_y = max(0, min(oy + dy, bottom_edge - min_size))
+                new_h = bottom_edge - new_y
 
             self.state.update_widget_geometry(w.id, new_x, new_y, new_w, new_h, commit=False)
 
@@ -1188,11 +1228,15 @@ class DesignCanvas(tk.Frame):
         else:
             self.canvas.config(cursor="arrow")
 
-    def _on_delete_key(self, event):
+    def _on_delete_key(self, event=None):
+        if self._is_text_editing(event):
+            return
         if self.state.selected_ids:
             self.state.remove_selected()
 
     def _nudge_selected(self, dx: int, dy: int, event):
+        if self._is_text_editing(event):
+            return
         if not self.state.selected_ids:
             return
         step = 10 if (event.state & 0x0001) else 1
@@ -1204,8 +1248,14 @@ class DesignCanvas(tk.Frame):
             w = self.state.widgets.get(wid)
             if not w or w.locked:
                 continue
+            max_cw, max_ch = self._get_parent_container_dimensions(w)
+            max_x = max(0, max_cw - w.width)
+            max_y = max(0, max_ch - w.height)
+            new_x = max(0, min(w.x + dx * step, max_x))
+            new_y = max(0, min(w.y + dy * step, max_y))
             self.state.update_widget_geometry(
-                wid, max(0, w.x + dx * step), max(0, w.y + dy * step),
+                wid, new_x, new_y,
                 w.width, w.height, commit=False, snap=False
             )
         self.state.push_state()
+

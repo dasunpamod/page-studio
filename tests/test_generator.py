@@ -201,5 +201,252 @@ class TestCodeGenerator(unittest.TestCase):
         # Check that new callback stub is appended
         self.assertIn("def on_toggle_remember():", code2)
 
+    def test_all_42_widgets_syntax_and_runtime_execution(self):
+        """Generates full code for an extreme test project with all 42 widgets and executes it."""
+        from pagestudio.core.models import WIDGET_CATALOG
+        import subprocess
+        import sys
+
+        self.assertEqual(len(WIDGET_CATALOG), 42)
+        state = ProjectState("All 42 Widgets App", 1000, 1000)
+
+        for idx, (wtype, spec) in enumerate(WIDGET_CATALOG.items()):
+            w = WidgetInstance.create(wtype, 10 + (idx % 3) * 300, 10 + (idx // 3) * 50, name_hint=f"{wtype.lower()}_{idx}")
+            state.add_widget(w)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gui_path, sup_path = CodeGenerator.generate_all(state, "all_42_app", tmpdir)
+
+            # 1. py_compile check
+            py_compile.compile(gui_path, doraise=True)
+            py_compile.compile(sup_path, doraise=True)
+
+            # 2. Modify mainloop for fast headless termination
+            with open(gui_path, "r", encoding="utf-8") as f:
+                code = f.read()
+            code = code.replace("root.mainloop()", "root.after(50, root.destroy)\n    root.mainloop()")
+            with open(gui_path, "w", encoding="utf-8") as f:
+                f.write(code)
+
+            # 3. Subprocess execution
+            env = os.environ.copy()
+            env["PYTHONPATH"] = tmpdir + os.pathsep + env.get("PYTHONPATH", "")
+            res = subprocess.run([sys.executable, gui_path], env=env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(res.returncode, 0, f"Process exited with error:\nSTDOUT:\n{res.stdout}\nSTDERR:\n{res.stderr}")
+
+    def test_extreme_nesting_combinations_syntax_and_execution(self):
+        """
+        Test extreme nesting:
+        A Toplevel containing a TNotebook, with tabs containing TPanedwindow,
+        containing Frames, containing ScrolledTreeview, ScrolledText, Combobox, and Buttons.
+        """
+        import subprocess
+        import sys
+
+        state = ProjectState("Extreme Nesting App", 900, 700)
+
+        # 1. Toplevel window
+        top = WidgetInstance.create("Toplevel", 50, 50, name_hint="my_toplevel")
+        top.width = 800
+        top.height = 600
+        state.add_widget(top)
+
+        # 2. TNotebook inside Toplevel
+        nb = WidgetInstance.create("TNotebook", 10, 10, name_hint="my_notebook")
+        nb.width = 760
+        nb.height = 540
+        nb.parent_id = top.id
+        nb.properties["tabs"] = [
+            {"id": "tab1", "text": "Dashboard"},
+            {"id": "tab2", "text": "Settings"}
+        ]
+        state.add_widget(nb)
+
+        # 3. TPanedwindow inside Tab 0 of TNotebook
+        pw = WidgetInstance.create("TPanedwindow", 10, 10, name_hint="my_paned")
+        pw.width = 720
+        pw.height = 480
+        pw.parent_id = nb.id
+        pw.container_tab_or_pane = "0"
+        state.add_widget(pw)
+
+        # 4. Frame inside TPanedwindow
+        frame = WidgetInstance.create("Frame", 10, 10, name_hint="inner_frame")
+        frame.width = 340
+        frame.height = 450
+        frame.parent_id = pw.id
+        state.add_widget(frame)
+
+        # 5. ScrolledTreeview inside Frame
+        stree = WidgetInstance.create("Scrolledtreeview", 10, 10, name_hint="nested_tree")
+        stree.width = 300
+        stree.height = 120
+        stree.parent_id = frame.id
+        stree.properties["columns"] = [{"id": "col1", "heading": "ID"}, {"id": "col2", "heading": "Name"}]
+        state.add_widget(stree)
+
+        # 6. ScrolledText inside Frame
+        stext = WidgetInstance.create("Scrolledtext", 10, 140, name_hint="nested_text")
+        stext.width = 300
+        stext.height = 100
+        stext.parent_id = frame.id
+        state.add_widget(stext)
+
+        # 7. Combobox inside Frame
+        cb = WidgetInstance.create("Combobox", 10, 250, name_hint="nested_combo")
+        cb.width = 180
+        cb.parent_id = frame.id
+        state.add_widget(cb)
+
+        # 8. Button inside Frame
+        btn = WidgetInstance.create("Button", 10, 290, name_hint="nested_action_btn")
+        btn.parent_id = frame.id
+        btn.events["command"] = "on_extreme_click"
+        state.add_widget(btn)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gui_path, sup_path = CodeGenerator.generate_all(state, "extreme_app", tmpdir)
+
+            # Compile check
+            py_compile.compile(gui_path, doraise=True)
+            py_compile.compile(sup_path, doraise=True)
+
+            with open(gui_path, "r", encoding="utf-8") as f:
+                gui_code = f.read()
+
+            # Verify hierarchy references
+            self.assertIn("self.my_toplevel = tk.Toplevel(self.root)", gui_code)
+            self.assertIn("self.my_toplevel.geometry(\"800x600+50+50\")", gui_code)
+            self.assertIn("self.my_notebook = ttk.Notebook(self.my_toplevel)", gui_code)
+            self.assertIn("self.my_paned = ttk.PanedWindow(self.my_notebook_t0", gui_code)
+            self.assertIn("self.inner_frame = ttk.Frame(self.my_paned)", gui_code)
+            self.assertIn("self.nested_tree_frame = ttk.Frame(self.inner_frame)", gui_code)
+            self.assertIn("self.nested_text_frame = ttk.Frame(self.inner_frame)", gui_code)
+            self.assertIn("self.nested_combo = ttk.Combobox(self.inner_frame", gui_code)
+            self.assertIn("self.nested_action_btn = ttk.Button(self.inner_frame", gui_code)
+
+            # Subprocess execution test
+            gui_code_headless = gui_code.replace("root.mainloop()", "root.after(50, root.destroy)\n    root.mainloop()")
+            with open(gui_path, "w", encoding="utf-8") as f:
+                f.write(gui_code_headless)
+
+            env = os.environ.copy()
+            env["PYTHONPATH"] = tmpdir + os.pathsep + env.get("PYTHONPATH", "")
+            res = subprocess.run([sys.executable, gui_path], env=env, capture_output=True, text=True, timeout=5)
+            self.assertEqual(res.returncode, 0, f"Execution failed: {res.stderr}")
+
+    def test_relative_mode_floats_no_none(self):
+        """Verify relative placement emits valid non-None float values formatted cleanly."""
+        state = ProjectState("Relative Floats App", 800, 600)
+        state.is_relative_mode = True
+
+        for i in range(5):
+            w = WidgetInstance.create("Button", 50 * i, 40 * i, name_hint=f"btn_rel_{i}")
+            # Leave rel_* values as None to verify automatic float calculation
+            w.rel_x = None
+            w.rel_y = None
+            w.rel_width = None
+            w.rel_height = None
+            state.add_widget(w)
+
+        gui_code = CodeGenerator.generate_gui_code(state, "rel_floats_app", "rel_floats_app_support")
+        import re
+        # Check place statement exists and does not contain None
+        place_matches = re.findall(r"\.place\((.*?)\)", gui_code)
+        self.assertGreater(len(place_matches), 0)
+        for args in place_matches:
+            self.assertNotIn("None", args)
+            self.assertIn("relx=", args)
+            self.assertIn("rely=", args)
+            self.assertIn("relwidth=", args)
+            self.assertIn("relheight=", args)
+            # Verify float format e.g. 0.2500
+            for param in ["relx", "rely", "relwidth", "relheight"]:
+                m = re.search(rf"{param}=([0-9]+\.[0-9]+)", args)
+                self.assertIsNotNone(m, f"Failed to match float for {param} in {args}")
+
+    def test_menubar_complex_cascades_checkbuttons_radiobuttons(self):
+        """Menubar with nested cascades, checkbuttons, radiobuttons, commands, accelerators."""
+        state = ProjectState("Menu Rich App", 700, 500)
+
+        item_open = MenuItemSpec(id="m_open", item_type="command", label="Open", command="cmd_open", accelerator="Ctrl+O")
+        item_save = MenuItemSpec(id="m_save", item_type="command", label="Save", command="cmd_save", accelerator="Ctrl+S")
+        cascade_file = MenuItemSpec(id="m_file", item_type="cascade", label="File", children=[item_open, item_save])
+
+        item_chk = MenuItemSpec(id="m_chk", item_type="checkbutton", label="Word Wrap", variable="wrap_var", command="on_wrap_toggle")
+        item_r1 = MenuItemSpec(id="m_r1", item_type="radiobutton", label="Light Mode", variable="theme_var", value="light")
+        item_r2 = MenuItemSpec(id="m_r2", item_type="radiobutton", label="Dark Mode", variable="theme_var", value="dark")
+        cascade_view = MenuItemSpec(id="m_view", item_type="cascade", label="View", children=[item_chk, item_r1, item_r2])
+
+        menubar = MenuBarSpec(id="main_menu", items=[cascade_file, cascade_view])
+        state.menus["main_menu"] = menubar
+
+        gui_code = CodeGenerator.generate_gui_code(state, "menu_rich_app", "menu_rich_app_support")
+        sup_code = CodeGenerator.generate_support_code(state, "menu_rich_app")
+
+        # GUI verification
+        self.assertIn('self.menubar.add_cascade(label="File"', gui_code)
+        self.assertIn('self.menubar.add_cascade(label="View"', gui_code)
+        self.assertIn('command=support.cmd_open', gui_code)
+        self.assertIn('accelerator="Ctrl+O"', gui_code)
+        self.assertIn('variable=support.wrap_var', gui_code)
+        self.assertIn('variable=support.theme_var', gui_code)
+        self.assertIn('value="light"', gui_code)
+        self.assertIn('value="dark"', gui_code)
+
+        # Support verification
+        self.assertIn("wrap_var = None", sup_code)
+        self.assertIn("theme_var = None", sup_code)
+        self.assertIn("wrap_var = tk.BooleanVar(value=False)", sup_code)
+        self.assertIn('theme_var = tk.StringVar(value="dark")', sup_code)
+        self.assertIn("def cmd_open():", sup_code)
+        self.assertIn("def cmd_save():", sup_code)
+        self.assertIn("def on_wrap_toggle():", sup_code)
+
+    def test_support_sentinel_replacement_and_user_code_untouched(self):
+        """User code outside sentinels is preserved 100%, and new widgets add variables and stubs."""
+        state = ProjectState("Preserve App", 400, 300)
+        e1 = WidgetInstance.create("Entry", 10, 10, name_hint="username")
+        state.add_widget(e1)
+
+        code1 = CodeGenerator.generate_support_code(state, "preserve_app")
+
+        # User adds custom import, function, and comment
+        user_additions = (
+            "# USER IMPORT\n"
+            "import math\n\n"
+            "# USER CUSTOM LOGIC\n"
+            "def calculate_tax(amount):\n"
+            "    return amount * 0.15\n"
+        )
+        existing = code1 + "\n" + user_additions
+
+        # Add a new widget and re-generate
+        b2 = WidgetInstance.create("Button", 10, 50, name_hint="submit_btn")
+        b2.events["command"] = "on_submit_action"
+        state.add_widget(b2)
+
+        c3 = WidgetInstance.create("Checkbutton", 10, 90, name_hint="terms_agreed")
+        state.add_widget(c3)
+
+        code2 = CodeGenerator.generate_support_code(state, "preserve_app", existing)
+
+        # Verify sentinels are intact
+        self.assertEqual(code2.count(CodeGenerator.DELIM_BEGIN), 1)
+        self.assertEqual(code2.count(CodeGenerator.DELIM_END), 1)
+
+        # Verify new variables in the delimited block
+        self.assertIn("username_var = None", code2)
+        self.assertIn("terms_agreed_var = None", code2)
+
+        # Verify user code is 100% untouched
+        self.assertIn("# USER IMPORT\nimport math", code2)
+        self.assertIn("def calculate_tax(amount):", code2)
+        self.assertIn("return amount * 0.15", code2)
+
+        # Verify new stub added
+        self.assertIn("def on_submit_action():", code2)
+
 if __name__ == "__main__":
     unittest.main()
+
