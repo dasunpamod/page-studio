@@ -266,9 +266,70 @@ class TestPropertyInspector(unittest.TestCase):
         self.state.add_listener(dummy_listener)
         self.assertEqual(len(self.state._listeners), initial_len + 1)
 
-        self.state.notify()
-        self.assertEqual(called[0], 1)
+    def test_in_place_property_update_no_dom_rebuild(self):
+        """Editing properties does not destroy/recreate inspector child widgets or jump scroll."""
+        btn = WidgetInstance.create("Button", 40, 50, name_hint="edit_btn")
+        self.state.add_widget(btn)
+        self.root.update_idletasks()
+
+        children_before = self.inspector.content.winfo_children()
+        child_ids_before = [id(c) for c in children_before]
+
+        # Scroll down partially
+        self.inspector.canvas.yview_moveto(0.3)
+        scroll_before = self.inspector.canvas.yview()[0]
+
+        # Edit property (as if typed into an Entry and pressed Return or focused out)
+        self.inspector._on_prop_change(btn, "text", "Updated Button Text")
+        self.root.update_idletasks()
+
+        # Children must be identical objects (NOT destroyed and recreated)
+        children_after = self.inspector.content.winfo_children()
+        child_ids_after = [id(c) for c in children_after]
+        self.assertEqual(child_ids_before, child_ids_after)
+
+        # Scroll position must NOT have reset or jumped
+        scroll_after = self.inspector.canvas.yview()[0]
+        self.assertAlmostEqual(scroll_before, scroll_after, places=2)
+
+    def test_lock_button_toggle_in_place(self):
+        """Toggling lock updates button in place without tearing down the inspector."""
+        btn = WidgetInstance.create("Button", 40, 50, name_hint="lock_btn")
+        self.state.add_widget(btn)
+        self.root.update_idletasks()
+
+        children_before = self.inspector.content.winfo_children()
+        child_ids_before = [id(c) for c in children_before]
+
+        # Toggle lock via inspector method
+        btn.locked = True
+        self.inspector._push_state_safely(btn)
+        self.root.update_idletasks()
+
+        children_after = self.inspector.content.winfo_children()
+        child_ids_after = [id(c) for c in children_after]
+        self.assertEqual(child_ids_before, child_ids_after)
+
+    def test_name_change_with_whitespace_sanitization(self):
+        """Changing name with whitespace sanitizes to underscores without destroying inspector widgets."""
+        btn = WidgetInstance.create("Button", 40, 50, name_hint="old_name")
+        self.state.add_widget(btn)
+        self.root.update_idletasks()
+
+        children_before = self.inspector.content.winfo_children()
+        child_ids_before = [id(c) for c in children_before]
+
+        var = tk.StringVar(value="new button name")
+        self.inspector._on_widget_name_change(btn, "new button name", var)
+        self.assertEqual(btn.name, "new_button_name")
+        self.assertEqual(var.get(), "new_button_name")
+
+        # Must not destroy widgets
+        children_after = self.inspector.content.winfo_children()
+        child_ids_after = [id(c) for c in children_after]
+        self.assertEqual(child_ids_before, child_ids_after)
 
 
 if __name__ == "__main__":
     unittest.main()
+

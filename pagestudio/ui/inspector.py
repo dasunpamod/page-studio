@@ -26,6 +26,7 @@ class PropertyInspector(tk.Frame):
         super().__init__(parent, bg=COLOR_BG_PANEL, **kwargs)
         self.state = state
         self._updating: bool = False
+        self._last_rendered_signature: Optional[Any] = None
 
         self._active_widget_id: Optional[str] = None
         self._active_is_relative: Optional[bool] = None
@@ -130,7 +131,47 @@ class PropertyInspector(tk.Frame):
         if self._is_mouse_over():
             self.canvas.yview_scroll(1, "units")
 
+    def _compute_signature(self, w: Optional[WidgetInstance]) -> Any:
+        if w:
+            return (
+                w.id,
+                w.name,
+                tuple(sorted((k, str(v)) for k, v in w.properties.items())),
+                tuple(sorted((k, str(v)) for k, v in w.events.items())),
+                w.parent_id,
+                w.locked,
+                w.is_relative,
+            )
+        else:
+            return (
+                "__window__",
+                self.state.title,
+                self.state.width,
+                self.state.height,
+                self.state.resizable_x,
+                self.state.resizable_y,
+                self.state.snap_to_grid,
+                self.state.grid_size,
+                tuple(sorted(self.state.menus.keys())),
+            )
+
+    def _push_state_safely(self, updated_widget: Optional[WidgetInstance] = None):
+        """Pushes state while preventing self-refresh tearing down inspector UI."""
+        if updated_widget:
+            self._last_rendered_signature = self._compute_signature(updated_widget)
+        else:
+            self._last_rendered_signature = self._compute_signature(self.state.get_selected_widget())
+        self._updating = True
+        try:
+            self.state.push_state()
+        finally:
+            self._updating = False
+
     def _update_scroll_region(self):
+        try:
+            self.content.update_idletasks()
+        except Exception:
+            pass
         bbox = self.canvas.bbox("all")
         if bbox:
             self.canvas.configure(scrollregion=bbox)
@@ -139,22 +180,22 @@ class PropertyInspector(tk.Frame):
         if not w or not hasattr(self, "_geom_vars") or not self._geom_vars:
             return
         if w.is_relative:
-            if "rel_x" in self._geom_vars and w.rel_x is not None:
+            if "rel_x" in self._geom_vars and self._geom_vars["rel_x"] is not None and w.rel_x is not None:
                 self._geom_vars["rel_x"].set(f"{w.rel_x:.4f}")
-            if "rel_y" in self._geom_vars and w.rel_y is not None:
+            if "rel_y" in self._geom_vars and self._geom_vars["rel_y"] is not None and w.rel_y is not None:
                 self._geom_vars["rel_y"].set(f"{w.rel_y:.4f}")
-            if "rel_width" in self._geom_vars and w.rel_width is not None:
+            if "rel_width" in self._geom_vars and self._geom_vars["rel_width"] is not None and w.rel_width is not None:
                 self._geom_vars["rel_width"].set(f"{w.rel_width:.4f}")
-            if "rel_height" in self._geom_vars and w.rel_height is not None:
+            if "rel_height" in self._geom_vars and self._geom_vars["rel_height"] is not None and w.rel_height is not None:
                 self._geom_vars["rel_height"].set(f"{w.rel_height:.4f}")
         else:
-            if "x" in self._geom_vars:
+            if "x" in self._geom_vars and self._geom_vars["x"] is not None:
                 self._geom_vars["x"].set(str(w.x))
-            if "y" in self._geom_vars:
+            if "y" in self._geom_vars and self._geom_vars["y"] is not None:
                 self._geom_vars["y"].set(str(w.y))
-            if "width" in self._geom_vars:
+            if "width" in self._geom_vars and self._geom_vars["width"] is not None:
                 self._geom_vars["width"].set(str(w.width))
-            if "height" in self._geom_vars:
+            if "height" in self._geom_vars and self._geom_vars["height"] is not None:
                 self._geom_vars["height"].set(str(w.height))
 
     def refresh(self):
@@ -165,15 +206,33 @@ class PropertyInspector(tk.Frame):
         selected = self.state.get_selected_widget()
         selected_id = selected.id if selected else None
         is_rel = selected.is_relative if selected else self.state.is_relative_mode
+        new_signature = self._compute_signature(selected)
 
-        # If currently in drag mode and the same widget is selected, only update geometry fields
-        if getattr(self.state, "is_dragging", False) and selected_id == self._active_widget_id and is_rel == self._active_is_relative:
+        # If currently in drag mode or if only geometry changed while same widget is selected,
+        # update geometry fields in place without destroying DOM
+        if (
+            selected
+            and selected_id == self._active_widget_id
+            and is_rel == self._active_is_relative
+            and new_signature == self._last_rendered_signature
+            and self._geom_vars
+        ):
             self._update_geometry_fields(selected)
             return
 
-        is_new_selection = (selected_id != self._active_widget_id) or (is_rel != self._active_is_relative)
+        is_new_widget = (selected_id != self._active_widget_id)
+
+        # Save scroll position if we are refreshing the same selection
+        scroll_pos = 0.0
+        if not is_new_widget:
+            try:
+                scroll_pos = self.canvas.yview()[0]
+            except Exception:
+                scroll_pos = 0.0
+
         self._active_widget_id = selected_id
         self._active_is_relative = is_rel
+        self._last_rendered_signature = new_signature
         self._geom_vars.clear()
 
         # Clear existing fields
@@ -189,8 +248,16 @@ class PropertyInspector(tk.Frame):
 
         self._update_scroll_region()
 
-        if is_new_selection:
-            self.canvas.yview_moveto(0.0)
+        if is_new_widget:
+            try:
+                self.canvas.yview_moveto(0.0)
+            except Exception:
+                pass
+        else:
+            try:
+                self.canvas.yview_moveto(scroll_pos)
+            except Exception:
+                pass
 
     # --------------------------------------------------------------------------
     # Collapsible Section Component
@@ -282,17 +349,21 @@ class PropertyInspector(tk.Frame):
 
     def _on_window_resizable(self, val: bool, axis: str):
         if axis == "x":
+            if self.state.resizable_x == val:
+                return
             self.state.resizable_x = val
         else:
+            if self.state.resizable_y == val:
+                return
             self.state.resizable_y = val
-        self.state.push_state()
+        self._push_state_safely()
 
     def _on_edit_root_menu(self):
         initial_spec = self.state.menus.get("main_menu")
 
         def on_save(saved_spec):
             self.state.menus["main_menu"] = saved_spec
-            self.state.push_state()
+            self._push_state_safely()
 
         MenuEditorDialog.edit_menu(self.winfo_toplevel(), initial_spec=initial_spec, on_save=on_save)
 
@@ -340,7 +411,14 @@ class PropertyInspector(tk.Frame):
         body = self._create_collapsible_section("identification", "Identification")
 
         # Name / Alias (auto-replaces spaces with _)
-        self._add_entry(body, "Name", w.name, lambda val: self._on_widget_name_change(w, val))
+        name_entry = self._add_entry(
+            body,
+            "Name",
+            w.name,
+            lambda val: self._on_widget_name_change(
+                w, val, getattr(name_entry, "_string_var", None)
+            ),
+        )
 
         # Class (Read-only)
         spec = WIDGET_CATALOG.get(w.widget_type)
@@ -371,7 +449,11 @@ class PropertyInspector(tk.Frame):
             new_parent_id = container_options.get(selected_lbl)
             if w.parent_id != new_parent_id:
                 try:
-                    self.state.set_widget_parent(w.id, new_parent_id)
+                    self._updating = True
+                    try:
+                        self.state.set_widget_parent(w.id, new_parent_id)
+                    finally:
+                        self._updating = False
                 except ValueError:
                     pass
 
@@ -459,9 +541,17 @@ class PropertyInspector(tk.Frame):
             relief="flat",
             font=(FONT_UI_FAMILY, 8, "bold"),
             pady=3,
-            cursor="hand2",
-            command=lambda: (setattr(w, "locked", not w.locked), self.state.push_state(), self.refresh())
+            cursor="hand2"
         )
+        def toggle_lock():
+            w.locked = not w.locked
+            btn_lock.config(
+                text="🔓 Unlock Geometry" if w.locked else "🔒 Lock Geometry",
+                bg="#b35900" if w.locked else "#282834"
+            )
+            self._push_state_safely(w)
+
+        btn_lock.config(command=toggle_lock)
         btn_lock.pack(fill="x", padx=12, pady=(6, 2))
 
         # Fill Container Button
@@ -476,11 +566,13 @@ class PropertyInspector(tk.Frame):
             font=(FONT_UI_FAMILY, 8, "bold"),
             pady=3,
             cursor="hand2",
-            command=lambda: self.state.fill_parent_container(w.id)
+            command=lambda: (self.state.fill_parent_container(w.id), self._update_geometry_fields(w))
         )
         btn_fill.pack(fill="x", padx=12, pady=2)
 
     def _set_geometry_mode(self, w: WidgetInstance, is_relative: bool):
+        if w.is_relative == is_relative:
+            return
         w.is_relative = is_relative
         if is_relative and (w.rel_x is None or w.rel_y is None):
             pw = self.state.widgets[w.parent_id].width if (w.parent_id and w.parent_id in self.state.widgets) else self.state.width
@@ -489,8 +581,25 @@ class PropertyInspector(tk.Frame):
             w.rel_y = round(w.y / max(1, ph), 4)
             w.rel_width = round(w.width / max(1, pw), 4)
             w.rel_height = round(w.height / max(1, ph), 4)
-        self.state.push_state()
+
+        # Preserve scroll position across geometry mode change
+        scroll_pos = 0.0
+        try:
+            scroll_pos = self.canvas.yview()[0]
+        except Exception:
+            pass
+
+        self._updating = True
+        try:
+            self.state.push_state()
+        finally:
+            self._updating = False
+
         self.refresh()
+        try:
+            self.canvas.yview_moveto(scroll_pos)
+        except Exception:
+            pass
 
     # --- SECTION 3: APPEARANCE ---
     def _render_section_appearance(self, w: WidgetInstance):
@@ -677,21 +786,21 @@ class PropertyInspector(tk.Frame):
         def on_save(saved_spec):
             self.state.menus[menu_key] = saved_spec
             w.properties["menu"] = saved_spec.name
-            self.state.push_state()
+            self._push_state_safely(w)
 
         MenuEditorDialog.edit_menu(self.winfo_toplevel(), initial_spec=initial_spec, on_save=on_save)
 
     def _on_edit_notebook_tabs(self, w: WidgetInstance):
         def on_save(saved_tabs):
             w.properties["tabs"] = saved_tabs
-            self.state.push_state()
+            self._push_state_safely(w)
 
         NotebookTabEditorDialog.edit_tabs(self.winfo_toplevel(), widget=w, state=self.state, on_save=on_save)
 
     def _on_edit_treeview_columns(self, w: WidgetInstance):
         def on_save(saved_cols):
             w.properties["columns"] = saved_cols
-            self.state.push_state()
+            self._push_state_safely(w)
 
         TreeviewColumnEditorDialog.edit_columns(self.winfo_toplevel(), widget=w, state=self.state, on_save=on_save)
 
@@ -884,73 +993,109 @@ class PropertyInspector(tk.Frame):
     # Value Change Mutators
     # --------------------------------------------------------------------------
     def _on_window_title_change(self, val: str):
+        if self.state.title == val:
+            return
         self.state.title = val
-        self.state.push_state()
+        self._push_state_safely()
 
     def _on_window_width_change(self, val: str):
         if val.isdigit() and int(val) >= 100:
-            self.state.width = int(val)
-            self.state.push_state()
+            new_w = int(val)
+            if self.state.width == new_w:
+                return
+            self.state.width = new_w
+            self._push_state_safely()
 
     def _on_window_height_change(self, val: str):
         if val.isdigit() and int(val) >= 100:
-            self.state.height = int(val)
-            self.state.push_state()
+            new_h = int(val)
+            if self.state.height == new_h:
+                return
+            self.state.height = new_h
+            self._push_state_safely()
 
     def _on_snap_grid_change(self, val: bool):
+        if self.state.snap_to_grid == val:
+            return
         self.state.snap_to_grid = val
-        self.state.push_state()
+        self._push_state_safely()
 
     def _on_grid_size_change(self, val: str):
         if val.isdigit() and int(val) >= 2:
-            self.state.grid_size = int(val)
-            self.state.push_state()
+            new_sz = int(val)
+            if self.state.grid_size == new_sz:
+                return
+            self.state.grid_size = new_sz
+            self._push_state_safely()
 
-    def _on_widget_name_change(self, w: WidgetInstance, val: str):
+    def _on_widget_name_change(self, w: WidgetInstance, val: str, var: Optional[tk.StringVar] = None):
         clean_name = val.strip().replace(" ", "_")
+        if var and clean_name != val:
+            var.set(clean_name)
         if clean_name and clean_name != w.name:
             w.name = clean_name
-            self.state.push_state()
+            self._push_state_safely(w)
 
     def _on_geom_change(self, w: WidgetInstance, prop: str, val: str):
         if not val.isdigit():
             return
         v = int(val)
-        if prop == "x":
+        changed = False
+        if prop == "x" and w.x != max(0, v):
             w.x = max(0, v)
-        elif prop == "y":
+            changed = True
+        elif prop == "y" and w.y != max(0, v):
             w.y = max(0, v)
-        elif prop == "width":
+            changed = True
+        elif prop == "width" and w.width != max(10, v):
             w.width = max(10, v)
-        elif prop == "height":
+            changed = True
+        elif prop == "height" and w.height != max(10, v):
             w.height = max(10, v)
-        self.state.push_state()
+            changed = True
+        if changed:
+            self._push_state_safely(w)
 
     def _on_rel_geom_change(self, w: WidgetInstance, prop: str, val: str):
         try:
             fv = float(val)
             fv = max(0.0, min(1.0, fv))
-            if prop == "rel_x":
+            changed = False
+            if prop == "rel_x" and w.rel_x != fv:
                 w.rel_x = fv
-            elif prop == "rel_y":
+                changed = True
+            elif prop == "rel_y" and w.rel_y != fv:
                 w.rel_y = fv
-            elif prop == "rel_width":
+                changed = True
+            elif prop == "rel_width" and w.rel_width != fv:
                 w.rel_width = fv
-            elif prop == "rel_height":
+                changed = True
+            elif prop == "rel_height" and w.rel_height != fv:
                 w.rel_height = fv
-            self.state.push_state()
+                changed = True
+            if changed:
+                self._push_state_safely(w)
         except ValueError:
             pass
 
     def _on_prop_change(self, w: WidgetInstance, prop: str, val: Any):
+        if w.properties.get(prop) == val:
+            return
         w.properties[prop] = val
-        self.state.push_state()
+        self._push_state_safely(w)
 
     def _on_color_prop_change(self, w: WidgetInstance, prop: str, val: str):
+        if w.properties.get(prop) == val:
+            return
         w.properties[prop] = val
-        self.state.push_state()
+        self._push_state_safely(w)
 
     def _on_event_change(self, w: WidgetInstance, event_name: str, val: str):
         clean_handler = val.strip().replace(" ", "_")
-        w.events[event_name] = clean_handler
-        self.state.push_state()
+        if w.events.get(event_name) == clean_handler:
+            return
+        if not clean_handler and event_name in w.events:
+            del w.events[event_name]
+        else:
+            w.events[event_name] = clean_handler
+        self._push_state_safely(w)
