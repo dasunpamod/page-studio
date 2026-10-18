@@ -6,7 +6,7 @@ Encodes and decodes PageStudio projects to/from human-readable JSON files (.pgpr
 import json
 from typing import Dict, Any, Optional
 from .state import ProjectState
-from .models import WidgetInstance
+from .models import WidgetInstance, MenuBarSpec
 
 class ProjectSerializer:
     """Handles serialization and file I/O for PageStudio project files."""
@@ -27,7 +27,10 @@ class ProjectSerializer:
             "canvas": {
                 "grid_size": state.grid_size,
                 "snap_to_grid": state.snap_to_grid,
+                "is_relative_mode": state.is_relative_mode,
             },
+            "menus": {k: v.to_dict() for k, v in state.menus.items()},
+            "popup_menus": {k: v.to_dict() for k, v in state.popup_menus.items()},
             "widgets": [
                 state.widgets[wid].to_dict()
                 for wid in state.widget_order
@@ -49,7 +52,11 @@ class ProjectSerializer:
         cv = data.get("canvas", {})
         state.grid_size = cv.get("grid_size", 10)
         state.snap_to_grid = cv.get("snap_to_grid", True)
+        state.is_relative_mode = cv.get("is_relative_mode", False)
         
+        state.menus = {k: MenuBarSpec.from_dict(v) for k, v in data.get("menus", {}).items()}
+        state.popup_menus = {k: MenuBarSpec.from_dict(v) for k, v in data.get("popup_menus", {}).items()}
+
         state.widgets.clear()
         state.widget_order.clear()
         for wdata in data.get("widgets", []):

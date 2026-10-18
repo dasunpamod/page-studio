@@ -9,10 +9,30 @@ import tempfile
 import subprocess
 import os
 import sys
-from typing import Optional
+import shutil
+import atexit
+from typing import Optional, Set
 from ..core.state import ProjectState
 from ..core.generator import CodeGenerator
 from ..ui.theme import COLOR_BG_PANEL, COLOR_ACCENT, FONT_UI_FAMILY, FONT_CODE_FAMILY
+
+PREVIEW_DIR = os.path.join(tempfile.gettempdir(), "pagestudio_preview")
+_active_processes: Set[subprocess.Popen] = set()
+
+def _cleanup_preview():
+    for p in list(_active_processes):
+        try:
+            if p.poll() is None:
+                p.terminate()
+        except Exception:
+            pass
+    try:
+        if os.path.exists(PREVIEW_DIR):
+            shutil.rmtree(PREVIEW_DIR, ignore_errors=True)
+    except Exception:
+        pass
+
+atexit.register(_cleanup_preview)
 
 class CodePreviewPanel(tk.Frame):
     """Live interactive preview of generated Python Tkinter code."""
@@ -126,17 +146,34 @@ class CodePreviewPanel(tk.Frame):
         except Exception as e:
             print(f"Error updating live code preview: {e}")
 
-    def run_test_gui(self):
-        """Generates temporary files and launches the live GUI in a test subprocess."""
+    def _terminate_active_proc(self):
+        """Terminates any actively running preview subprocess."""
         if self._active_proc and self._active_proc.poll() is None:
-            # Already running
-            return
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            gui_path, support_path = CodeGenerator.generate_all(self.state, self.app_name, tmpdir)
             try:
-                # Launch test application
-                proc = subprocess.Popen([sys.executable, gui_path])
-                self._active_proc = proc
-            except Exception as e:
-                messagebox.showerror("Execution Error", f"Failed to launch test GUI:\n{e}")
+                self._active_proc.terminate()
+                try:
+                    self._active_proc.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    self._active_proc.kill()
+            except Exception:
+                pass
+        self._active_proc = None
+
+    def run_test_gui(self):
+        """Generates preview files and launches the live GUI in a test subprocess."""
+        # Terminate any running preview process before starting a new one
+        self._terminate_active_proc()
+
+        try:
+            os.makedirs(PREVIEW_DIR, exist_ok=True)
+            gui_path, support_path = CodeGenerator.generate_all(self.state, self.app_name, PREVIEW_DIR)
+            proc = subprocess.Popen([sys.executable, gui_path])
+            self._active_proc = proc
+            _active_processes.add(proc)
+        except Exception as e:
+            messagebox.showerror("Execution Error", f"Failed to launch test GUI:\n{e}")
+
+    def destroy(self):
+        """Cleanup process when panel is destroyed."""
+        self._terminate_active_proc()
+        super().destroy()

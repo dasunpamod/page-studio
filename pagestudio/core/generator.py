@@ -6,27 +6,62 @@ Generates clean, standard Python 2-file architecture:
 """
 
 import os
-from typing import Dict, Any, Tuple, List, Set
+import re
+from typing import Dict, Any, Tuple, List, Set, Optional, Union
 from .state import ProjectState
-from .models import WidgetInstance
+from .models import WidgetInstance, MenuItemSpec, MenuBarSpec
+
 
 class CodeGenerator:
     """Generates production-grade, zero-dependency Python Tkinter code."""
 
+    DELIM_BEGIN = "# === PAGESTUDIO VARIABLES BEGIN ==="
+    DELIM_END = "# === PAGESTUDIO VARIABLES END ==="
+
     @staticmethod
     def sanitize_identifier(name: str) -> str:
         """Ensure string is a valid Python identifier."""
-        import re
         s = re.sub(r'\W|^(?=\d)', '_', name)
         return s or "widget"
 
     @classmethod
-    def generate_gui_code(cls, state: ProjectState, app_name: str, support_module_name: str) -> str:
+    def _get_topological_order(cls, state: ProjectState) -> List[str]:
+        """
+        Return widget IDs in topological order (parents before children)
+        while preserving the relative creation order from state.widget_order.
+        """
+        visited: Set[str] = set()
+        visiting: Set[str] = set()
+        order: List[str] = []
+
+        def visit(wid: str):
+            if wid in visited or wid not in state.widgets:
+                return
+            if wid in visiting:
+                # Cycle detected in hierarchy; break cycle safely
+                return
+            visiting.add(wid)
+            w = state.widgets[wid]
+            if w.parent_id and w.parent_id in state.widgets:
+                visit(w.parent_id)
+            visiting.remove(wid)
+            visited.add(wid)
+            order.append(wid)
+
+        for wid in state.widget_order:
+            visit(wid)
+        return order
+
+    @classmethod
+    def generate_gui_code(cls, state: ProjectState, app_name: str, support_module_name: Optional[str] = None) -> str:
         """Generate the main GUI presentation module (<app>.py)."""
+        if support_module_name is None:
+            support_module_name = f"{app_name}_support"
+
         # Clean class name (e.g. login_app -> LoginApp)
         parts = [p.capitalize() for p in app_name.split("_") if p.lower() != "app"]
         app_class = ("".join(parts) or "Main") + "App"
-        
+
         lines: List[str] = [
             '#!/usr/bin/env python3',
             '# -*- coding: utf-8 -*-',
@@ -38,6 +73,7 @@ class CodeGenerator:
             'import sys',
             'import tkinter as tk',
             'from tkinter import ttk',
+            'from tkinter import messagebox',
             f'import {support_module_name} as support',
             '',
             f'class {app_class}:',
@@ -56,16 +92,32 @@ class CodeGenerator:
             '    def _create_widgets(self):',
         ]
 
-        if not state.widget_order:
-            lines.append('        pass  # No widgets placed yet')
+        widget_order = cls._get_topological_order(state)
+
+        # Check if Menus need to be generated
+        has_menu = False
+        main_menu: Optional[MenuBarSpec] = None
+        if state.menus:
+            main_menu = state.menus.get("main_menu") or (list(state.menus.values())[0] if state.menus else None)
+            if main_menu and main_menu.items:
+                has_menu = True
+
+        if has_menu and main_menu:
+            menu_lines = cls._generate_menu_code(main_menu)
+            lines.extend(f'        {line}' for line in menu_lines)
+            lines.append('')
+
+        if not widget_order:
+            if not has_menu:
+                lines.append('        pass  # No widgets placed yet')
             lines.append('')
         else:
-            # Generate widget instances
-            for wid in state.widget_order:
+            # Generate widget instances in topological order
+            for wid in widget_order:
                 w = state.widgets.get(wid)
                 if not w:
                     continue
-                w_lines = cls._generate_widget_creation(w, support_module_name)
+                w_lines = cls._generate_widget_creation(w, support_module_name, state)
                 lines.extend(f'        {line}' for line in w_lines)
                 lines.append('')
 
@@ -84,49 +136,139 @@ class CodeGenerator:
         return "\n".join(lines)
 
     @classmethod
-    def _generate_widget_creation(cls, w: WidgetInstance, support_mod: str) -> List[str]:
+    def _generate_menu_code(cls, menubar_spec: MenuBarSpec) -> List[str]:
+        """Generate Tkinter menu hierarchy code."""
+        lines = [
+            '# Application Menubar',
+            'self.menubar = tk.Menu(self.root)',
+            'self.root.configure(menu=self.menubar)',
+        ]
+
+        def emit_items(parent_menu_var: str, items: List[MenuItemSpec], prefix: str = "menu"):
+            for idx, item in enumerate(items):
+                itype = item.item_type
+                if itype == "cascade":
+                    clean_lbl = cls.sanitize_identifier(item.label.lower() or f"cascade_{idx}")
+                    sub_var = f"self.{prefix}_{clean_lbl}"
+                    lines.append(f'{sub_var} = tk.Menu({parent_menu_var}, tearoff=0)')
+                    under_arg = f', underline={item.underline}' if item.underline >= 0 else ''
+                    lines.append(f'{parent_menu_var}.add_cascade(label="{item.label}", menu={sub_var}{under_arg})')
+                    emit_items(sub_var, item.children, f"{prefix}_{clean_lbl}")
+                elif itype == "command":
+                    args = [f'label="{item.label}"']
+                    if item.command:
+                        args.append(f'command=support.{cls.sanitize_identifier(item.command)}')
+                    if item.accelerator:
+                        args.append(f'accelerator="{item.accelerator}"')
+                    if item.underline >= 0:
+                        args.append(f'underline={item.underline}')
+                    if item.state and item.state != "normal":
+                        args.append(f'state="{item.state}"')
+                    lines.append(f'{parent_menu_var}.add_command({", ".join(args)})')
+                elif itype == "separator":
+                    lines.append(f'{parent_menu_var}.add_separator()')
+                elif itype == "checkbutton":
+                    args = [f'label="{item.label}"']
+                    if item.variable:
+                        args.append(f'variable=support.{cls.sanitize_identifier(item.variable)}')
+                    if item.command:
+                        args.append(f'command=support.{cls.sanitize_identifier(item.command)}')
+                    if item.accelerator:
+                        args.append(f'accelerator="{item.accelerator}"')
+                    if item.underline >= 0:
+                        args.append(f'underline={item.underline}')
+                    lines.append(f'{parent_menu_var}.add_checkbutton({", ".join(args)})')
+                elif itype == "radiobutton":
+                    args = [f'label="{item.label}"']
+                    if item.variable:
+                        args.append(f'variable=support.{cls.sanitize_identifier(item.variable)}')
+                    if item.value is not None:
+                        args.append(f'value="{item.value}"')
+                    if item.command:
+                        args.append(f'command=support.{cls.sanitize_identifier(item.command)}')
+                    if item.accelerator:
+                        args.append(f'accelerator="{item.accelerator}"')
+                    if item.underline >= 0:
+                        args.append(f'underline={item.underline}')
+                    lines.append(f'{parent_menu_var}.add_radiobutton({", ".join(args)})')
+
+        emit_items('self.menubar', menubar_spec.items)
+        return lines
+
+    @classmethod
+    def _generate_widget_creation(cls, w: WidgetInstance, support_mod: str, state: Optional[ProjectState] = None) -> List[str]:
         var_name = cls.sanitize_identifier(w.name)
         lines: List[str] = []
         w_type = w.widget_type
-        
-        # Parent window or container
-        parent = "self.root"
 
-        # Determine widget creation syntax
+        # Determine parent reference
+        if state and w.parent_id and w.parent_id in state.widgets:
+            parent_w = state.widgets[w.parent_id]
+            parent_var = cls.sanitize_identifier(parent_w.name)
+            if parent_w.widget_type in ("TNotebook", "Notebook"):
+                # Child of a notebook: parent to the corresponding tab frame
+                tabs = parent_w.properties.get("tabs", ["Tab 1", "Tab 2"])
+                tab_idx = 0
+                if w.container_tab_or_pane is not None:
+                    for i, t in enumerate(tabs):
+                        tid = t.get("id") if isinstance(t, dict) else None
+                        ttxt = t.get("text") if isinstance(t, dict) else str(t)
+                        if str(w.container_tab_or_pane) in (str(i), tid, ttxt):
+                            tab_idx = i
+                            break
+                parent = f"self.{parent_var}_t{tab_idx}"
+            else:
+                parent = f"self.{parent_var}"
+        else:
+            parent = "self.root"
+
+        is_scrolled = w_type in ("Scrolledtext", "Scrolledlistbox", "Scrolledtreeview")
+
+        # Widget Creation
         if w_type == "Button":
             cmd = w.events.get("command")
-            cmd_arg = f', command=support.{cmd}' if cmd else ''
+            cmd_arg = f', command=support.{cls.sanitize_identifier(cmd)}' if cmd else ''
             text = w.properties.get("text", "Button")
             lines.append(f'self.{var_name} = ttk.Button({parent}, text="{text}"{cmd_arg})')
 
-        elif w_type == "Label":
+        elif w_type == "TButton":
+            cmd = w.events.get("command")
+            cmd_arg = f', command=support.{cls.sanitize_identifier(cmd)}' if cmd else ''
+            text = w.properties.get("text", "Button")
+            lines.append(f'self.{var_name} = ttk.Button({parent}, text="{text}"{cmd_arg})')
+
+        elif w_type in ("Label", "TLabel"):
             text = w.properties.get("text", "Label Text")
             lines.append(f'self.{var_name} = ttk.Label({parent}, text="{text}")')
 
-        elif w_type == "Entry":
-            var_hook = f'textvariable=support.{var_name}_var'
+        elif w_type in ("Entry", "TEntry", "Scrolledentry"):
+            var_prop = w.properties.get("variable") or f"{var_name}_var"
+            var_hook = f'textvariable=support.{cls.sanitize_identifier(var_prop)}'
             show_char = w.properties.get("show")
             show_arg = f', show="{show_char}"' if show_char else ''
             lines.append(f'self.{var_name} = ttk.Entry({parent}, {var_hook}{show_arg})')
 
-        elif w_type == "Checkbutton":
+        elif w_type in ("Checkbutton", "TCheckbutton"):
             text = w.properties.get("text", "Check Option")
-            var_hook = f'variable=support.{var_name}_var'
+            var_prop = w.properties.get("variable") or f"{var_name}_var"
+            var_hook = f'variable=support.{cls.sanitize_identifier(var_prop)}'
             cmd = w.events.get("command")
-            cmd_arg = f', command=support.{cmd}' if cmd else ''
+            cmd_arg = f', command=support.{cls.sanitize_identifier(cmd)}' if cmd else ''
             lines.append(f'self.{var_name} = ttk.Checkbutton({parent}, text="{text}", {var_hook}{cmd_arg})')
 
-        elif w_type == "Radiobutton":
+        elif w_type in ("Radiobutton", "TRadiobutton"):
             text = w.properties.get("text", "Radio Option")
             val = w.properties.get("value", "1")
-            var_hook = f'variable=support.{var_name}_var'
+            var_prop = w.properties.get("variable") or f"{var_name}_var"
+            var_hook = f'variable=support.{cls.sanitize_identifier(var_prop)}'
             cmd = w.events.get("command")
-            cmd_arg = f', command=support.{cmd}' if cmd else ''
+            cmd_arg = f', command=support.{cls.sanitize_identifier(cmd)}' if cmd else ''
             lines.append(f'self.{var_name} = ttk.Radiobutton({parent}, text="{text}", value="{val}", {var_hook}{cmd_arg})')
 
-        elif w_type == "Combobox":
+        elif w_type in ("Combobox", "TCombobox"):
             vals = w.properties.get("values", ["Option 1", "Option 2"])
-            var_hook = f'textvariable=support.{var_name}_var'
+            var_prop = w.properties.get("variable") or f"{var_name}_var"
+            var_hook = f'textvariable=support.{cls.sanitize_identifier(var_prop)}'
             lines.append(f'self.{var_name} = ttk.Combobox({parent}, values={vals}, {var_hook})')
 
         elif w_type == "Listbox":
@@ -135,41 +277,147 @@ class CodeGenerator:
         elif w_type == "Text":
             lines.append(f'self.{var_name} = tk.Text({parent}, wrap="word")')
 
-        elif w_type == "Progressbar":
+        elif w_type == "Scrolledtext":
+            # Scrolledtext: Frame container with tk.Text + ttk.Scrollbar
+            lines.append(f'self.{var_name}_frame = ttk.Frame({parent})')
+            lines.append(f'self.{var_name}_vbar = ttk.Scrollbar(self.{var_name}_frame, orient="vertical")')
+            lines.append(f'self.{var_name}_vbar.pack(side="right", fill="y")')
+            lines.append(f'self.{var_name} = tk.Text(self.{var_name}_frame, wrap="word", yscrollcommand=self.{var_name}_vbar.set)')
+            lines.append(f'self.{var_name}.pack(side="left", fill="both", expand=True)')
+            lines.append(f'self.{var_name}_vbar.config(command=self.{var_name}.yview)')
+
+        elif w_type == "Scrolledlistbox":
+            # Scrolledlistbox: Frame container with tk.Listbox + ttk.Scrollbar
+            lines.append(f'self.{var_name}_frame = ttk.Frame({parent})')
+            lines.append(f'self.{var_name}_vbar = ttk.Scrollbar(self.{var_name}_frame, orient="vertical")')
+            lines.append(f'self.{var_name}_vbar.pack(side="right", fill="y")')
+            lines.append(f'self.{var_name} = tk.Listbox(self.{var_name}_frame, yscrollcommand=self.{var_name}_vbar.set)')
+            lines.append(f'self.{var_name}.pack(side="left", fill="both", expand=True)')
+            lines.append(f'self.{var_name}_vbar.config(command=self.{var_name}.yview)')
+
+        elif w_type in ("Treeview", "Scrolledtreeview"):
+            if w_type == "Scrolledtreeview":
+                # Scrolledtreeview: Frame container with ttk.Treeview + vertical/horizontal scrollbars
+                lines.append(f'self.{var_name}_frame = ttk.Frame({parent})')
+                lines.append(f'self.{var_name}_vbar = ttk.Scrollbar(self.{var_name}_frame, orient="vertical")')
+                lines.append(f'self.{var_name}_vbar.pack(side="right", fill="y")')
+                lines.append(f'self.{var_name}_hbar = ttk.Scrollbar(self.{var_name}_frame, orient="horizontal")')
+                lines.append(f'self.{var_name}_hbar.pack(side="bottom", fill="x")')
+                lines.append(f'self.{var_name} = ttk.Treeview(self.{var_name}_frame, yscrollcommand=self.{var_name}_vbar.set, xscrollcommand=self.{var_name}_hbar.set)')
+                lines.append(f'self.{var_name}.pack(side="left", fill="both", expand=True)')
+                lines.append(f'self.{var_name}_vbar.config(command=self.{var_name}.yview)')
+                lines.append(f'self.{var_name}_hbar.config(command=self.{var_name}.xview)')
+            else:
+                lines.append(f'self.{var_name} = ttk.Treeview({parent})')
+
+            cols = w.properties.get("columns", [])
+            if cols:
+                col_ids = [c["id"] if isinstance(c, dict) else str(c) for c in cols]
+                lines.append(f'self.{var_name}["columns"] = {tuple(col_ids)}')
+                lines.append(f'self.{var_name}["show"] = "headings"')
+                for c in cols:
+                    if isinstance(c, dict):
+                        cid = c.get("id", "col")
+                        head = c.get("heading", cid)
+                        width = c.get("width", 100)
+                        anchor = c.get("anchor", "w")
+                        stretch = c.get("stretch", True)
+                        lines.append(f'self.{var_name}.heading("{cid}", text="{head}")')
+                        lines.append(f'self.{var_name}.column("{cid}", anchor="{anchor}", width={width}, stretch={stretch})')
+                    else:
+                        lines.append(f'self.{var_name}.heading("{c}", text="{c}")')
+                        lines.append(f'self.{var_name}.column("{c}", anchor="w", width=100)')
+
+        elif w_type in ("Progressbar", "TProgressbar"):
             maximum = w.properties.get("maximum", 100)
             val = w.properties.get("value", 0)
             lines.append(f'self.{var_name} = ttk.Progressbar({parent}, maximum={maximum}, value={val})')
 
-        elif w_type == "Scale":
+        elif w_type in ("Scale", "TScale"):
             from_ = w.properties.get("from_", 0)
             to_ = w.properties.get("to", 100)
             orient = w.properties.get("orient", "horizontal")
-            lines.append(f'self.{var_name} = ttk.Scale({parent}, from_={from_}, to={to_}, orient="{orient}", variable=support.{var_name}_var)')
+            var_prop = w.properties.get("variable") or f"{var_name}_var"
+            lines.append(f'self.{var_name} = ttk.Scale({parent}, from_={from_}, to={to_}, orient="{orient}", variable=support.{cls.sanitize_identifier(var_prop)})')
 
-        elif w_type == "Separator":
+        elif w_type in ("Separator", "TSeparator"):
             orient = w.properties.get("orient", "horizontal")
             lines.append(f'self.{var_name} = ttk.Separator({parent}, orient="{orient}")')
 
-        elif w_type == "Frame":
+        elif w_type in ("Frame", "TFrame", "Scrolledwindow"):
             lines.append(f'self.{var_name} = ttk.Frame({parent})')
 
-        elif w_type == "LabelFrame":
+        elif w_type in ("LabelFrame", "TLabelframe"):
             text = w.properties.get("text", "Group Box")
             lines.append(f'self.{var_name} = ttk.LabelFrame({parent}, text="{text}")')
 
         elif w_type == "Canvas":
-            lines.append(f'self.{var_name} = tk.Canvas({parent}, bg="white")')
+            bg = w.properties.get("bg", "white")
+            lines.append(f'self.{var_name} = tk.Canvas({parent}, bg="{bg}")')
+
+        elif w_type in ("Spinbox", "TSpinbox"):
+            from_ = w.properties.get("from_", 0)
+            to_ = w.properties.get("to", 100)
+            var_prop = w.properties.get("variable") or f"{var_name}_var"
+            lines.append(f'self.{var_name} = ttk.Spinbox({parent}, from_={from_}, to={to_}, textvariable=support.{cls.sanitize_identifier(var_prop)})')
+
+        elif w_type == "Message":
+            text = w.properties.get("text", "Message")
+            lines.append(f'self.{var_name} = tk.Message({parent}, text="{text}")')
+
+        elif w_type in ("Menubutton", "TMenubutton"):
+            text = w.properties.get("text", "Menu")
+            lines.append(f'self.{var_name} = ttk.Menubutton({parent}, text="{text}")')
+
+        elif w_type in ("TNotebook", "Notebook"):
+            lines.append(f'self.{var_name} = ttk.Notebook({parent})')
+
+        elif w_type == "TPanedwindow":
+            orient = w.properties.get("orient", "horizontal")
+            lines.append(f'self.{var_name} = ttk.PanedWindow({parent}, orient="{orient}")')
+
+        elif w_type == "TSizegrip":
+            lines.append(f'self.{var_name} = ttk.Sizegrip({parent})')
+
+        elif w_type == "Toplevel":
+            title = w.properties.get("title", "Window")
+            lines.append(f'self.{var_name} = tk.Toplevel({parent})')
+            lines.append(f'self.{var_name}.title("{title}")')
 
         else:
             lines.append(f'self.{var_name} = ttk.Label({parent}, text="{w_type}")')
 
-        # Place geometry manager
-        lines.append(f'self.{var_name}.place(x={w.x}, y={w.y}, width={w.width}, height={w.height})')
+        # Place the widget (or the outer frame for scrolled widgets)
+        target_ref = f"self.{var_name}_frame" if is_scrolled else f"self.{var_name}"
+
+        # Relative vs Absolute Placement
+        is_rel = w.is_relative or (state.is_relative_mode if state else False)
+        if is_rel:
+            pw = state.widgets[w.parent_id].width if (state and w.parent_id and w.parent_id in state.widgets) else (state.width if state else 600)
+            ph = state.widgets[w.parent_id].height if (state and w.parent_id and w.parent_id in state.widgets) else (state.height if state else 400)
+            rx = w.rel_x if w.rel_x is not None else round(w.x / max(1, pw), 4)
+            ry = w.rel_y if w.rel_y is not None else round(w.y / max(1, ph), 4)
+            rw = w.rel_width if w.rel_width is not None else round(w.width / max(1, pw), 4)
+            rh = w.rel_height if w.rel_height is not None else round(w.height / max(1, ph), 4)
+            lines.append(f'{target_ref}.place(relx={rx:.4f}, rely={ry:.4f}, relwidth={rw:.4f}, relheight={rh:.4f})')
+        else:
+            lines.append(f'{target_ref}.place(x={w.x}, y={w.y}, width={w.width}, height={w.height})')
+
+        # Notebook tabs generation
+        if w_type in ("TNotebook", "Notebook"):
+            tabs = w.properties.get("tabs", ["Tab 1", "Tab 2"])
+            for idx, tab in enumerate(tabs):
+                tab_text = tab.get("text", f"Tab {idx+1}") if isinstance(tab, dict) else str(tab)
+                tab_state = tab.get("state", "normal") if isinstance(tab, dict) else "normal"
+                state_arg = f', state="{tab_state}"' if tab_state != "normal" else ''
+                tab_frame_name = f"{var_name}_t{idx}"
+                lines.append(f'self.{tab_frame_name} = ttk.Frame(self.{var_name})')
+                lines.append(f'self.{var_name}.add(self.{tab_frame_name}, text="{tab_text}"{state_arg})')
 
         # Event bindings
         for evt, handler in w.events.items():
-            if evt != "command":
-                lines.append(f'self.{var_name}.bind("{evt}", support.{handler})')
+            if evt != "command" and handler:
+                lines.append(f'self.{var_name}.bind("{evt}", support.{cls.sanitize_identifier(handler)})')
 
         return lines
 
@@ -177,8 +425,156 @@ class CodeGenerator:
     def generate_support_code(cls, state: ProjectState, app_name: str, existing_code: Optional[str] = None) -> str:
         """
         Generate support module (<app>_support.py) containing callback functions & global vars.
-        If existing_code is passed, preserves existing implemented user logic.
+        Reconciles variables inside '# === PAGESTUDIO VARIABLES BEGIN ===' delimiters and
+        preserves existing user implemented code.
         """
+        # 1. Collect all required variables from widgets and menus
+        var_specs: Dict[str, Tuple[str, Any]] = {}  # var_name -> (type_name, default_value)
+
+        for wid in state.widget_order:
+            w = state.widgets.get(wid)
+            if not w:
+                continue
+            name = cls.sanitize_identifier(w.name)
+            custom_var = w.properties.get("variable")
+
+            if w.widget_type in ("Entry", "TEntry", "Combobox", "TCombobox", "Scrolledentry"):
+                vname = cls.sanitize_identifier(custom_var) if custom_var else f"{name}_var"
+                var_specs[vname] = ("StringVar", w.properties.get("text", ""))
+            elif w.widget_type in ("Checkbutton", "TCheckbutton"):
+                vname = cls.sanitize_identifier(custom_var) if custom_var else f"{name}_var"
+                var_specs[vname] = ("BooleanVar", False)
+            elif w.widget_type in ("Radiobutton", "TRadiobutton"):
+                vname = cls.sanitize_identifier(custom_var) if custom_var else f"{name}_var"
+                var_specs[vname] = ("StringVar", w.properties.get("value", "1"))
+            elif w.widget_type in ("Scale", "TScale"):
+                vname = cls.sanitize_identifier(custom_var) if custom_var else f"{name}_var"
+                var_specs[vname] = ("DoubleVar", 0.0)
+            elif w.widget_type in ("Spinbox", "TSpinbox"):
+                vname = cls.sanitize_identifier(custom_var) if custom_var else f"{name}_var"
+                var_specs[vname] = ("StringVar", str(w.properties.get("from_", 0)))
+
+        # Also collect checkbutton / radiobutton variables from menus
+        def collect_menu_vars(items: List[MenuItemSpec]):
+            for item in items:
+                if item.item_type in ("checkbutton", "radiobutton") and item.variable:
+                    vname = cls.sanitize_identifier(item.variable)
+                    if item.item_type == "checkbutton":
+                        var_specs[vname] = ("BooleanVar", False)
+                    else:
+                        var_specs[vname] = ("StringVar", item.value or "1")
+                if item.children:
+                    collect_menu_vars(item.children)
+
+        for menu_spec in state.menus.values():
+            collect_menu_vars(menu_spec.items)
+        for menu_spec in state.popup_menus.values():
+            collect_menu_vars(menu_spec.items)
+
+        # 2. Build Delimited Variables Block
+        var_decl_lines = []
+        init_var_lines = []
+        for var_name, (vtype, default_val) in sorted(var_specs.items()):
+            var_decl_lines.append(f"{var_name} = None")
+            init_var_lines.append(f"    global {var_name}")
+            if vtype == "StringVar":
+                init_var_lines.append(f'    {var_name} = tk.StringVar(value="{default_val}")')
+            elif vtype == "BooleanVar":
+                init_var_lines.append(f'    {var_name} = tk.BooleanVar(value={bool(default_val)})')
+            elif vtype == "DoubleVar":
+                init_var_lines.append(f'    {var_name} = tk.DoubleVar(value={float(default_val)})')
+            elif vtype == "IntVar":
+                init_var_lines.append(f'    {var_name} = tk.IntVar(value={int(default_val)})')
+
+        var_decl_str = "\n".join(var_decl_lines) if var_decl_lines else "# (No input variables required)"
+        init_var_str = "\n".join(init_var_lines) if init_var_lines else "    pass"
+
+        delimited_var_block = (
+            f"{cls.DELIM_BEGIN}\n"
+            f"# Global Tk Variables\n"
+            f"{var_decl_str}\n"
+            "\n"
+            "def init(top_root, top_app):\n"
+            '    """Called before GUI widgets are created."""\n'
+            "    global root, app\n"
+            "    root = top_root\n"
+            "    app = top_app\n"
+            f"{init_var_str}\n"
+            f"{cls.DELIM_END}"
+        )
+
+        # 3. Collect all event handler names
+        handlers: Set[Tuple[str, bool]] = set()  # (handler_name, is_event_object)
+        for wid in state.widget_order:
+            w = state.widgets.get(wid)
+            if not w:
+                continue
+            for evt, handler in w.events.items():
+                if handler:
+                    clean_h = cls.sanitize_identifier(handler)
+                    is_event = (evt != "command")
+                    handlers.add((clean_h, is_event))
+
+        # Also collect menu commands
+        def collect_menu_handlers(items: List[MenuItemSpec]):
+            for item in items:
+                if item.command:
+                    clean_h = cls.sanitize_identifier(item.command)
+                    handlers.add((clean_h, False))
+                if item.children:
+                    collect_menu_handlers(item.children)
+
+        for menu_spec in state.menus.values():
+            collect_menu_handlers(menu_spec.items)
+        for menu_spec in state.popup_menus.values():
+            collect_menu_handlers(menu_spec.items)
+
+        # 4. Reconcile with existing code
+        if existing_code:
+            code = existing_code
+            if cls.DELIM_BEGIN in code and cls.DELIM_END in code:
+                start_idx = code.find(cls.DELIM_BEGIN)
+                end_idx = code.find(cls.DELIM_END) + len(cls.DELIM_END)
+                code = code[:start_idx] + delimited_var_block + code[end_idx:]
+            else:
+                # Wrap existing code with standard header and delimiter block
+                code = (
+                    "#!/usr/bin/env python3\n"
+                    "# -*- coding: utf-8 -*-\n"
+                    '"""\n'
+                    f"Support module generated by PageStudio for {app_name}.py\n"
+                    "Put your business logic, event handlers, and data processing here.\n"
+                    '"""\n\n'
+                    "import tkinter as tk\n"
+                    "from tkinter import messagebox\n\n"
+                    "# Global application and root references\n"
+                    "root = None\n"
+                    "app = None\n\n"
+                    f"{delimited_var_block}\n\n"
+                    "# --------------------------------------------------------------------------\n"
+                    "# Event Handlers & Callbacks\n"
+                    "# --------------------------------------------------------------------------\n"
+                    f"{existing_code.strip()}\n"
+                )
+
+            # Append only new missing callback stubs
+            new_stubs = []
+            for handler, is_event in sorted(handlers):
+                if f"def {handler}(" not in code:
+                    param = "event" if is_event else ""
+                    new_stubs.extend([
+                        '',
+                        f'def {handler}({param}):',
+                        f'    """Callback handler for {handler}"""',
+                        f'    print("[Callback] {handler} triggered")',
+                        '    # TODO: Implement your application logic here',
+                        '    pass'
+                    ])
+            if new_stubs:
+                return code.rstrip() + "\n" + "\n".join(new_stubs) + "\n"
+            return code.rstrip() + "\n"
+
+        # Generate fresh support module
         lines: List[str] = [
             '#!/usr/bin/env python3',
             '# -*- coding: utf-8 -*-',
@@ -194,101 +590,12 @@ class CodeGenerator:
             'root = None',
             'app = None',
             '',
-            '# Global Tk Variables',
-        ]
-
-        # Collect variables
-        var_lines: List[str] = []
-        for wid in state.widget_order:
-            w = state.widgets.get(wid)
-            if not w:
-                continue
-            name = cls.sanitize_identifier(w.name)
-            if w.widget_type in ("Entry", "Combobox"):
-                var_lines.append(f'{name}_var = None')
-            elif w.widget_type == "Checkbutton":
-                var_lines.append(f'{name}_var = None')
-            elif w.widget_type == "Radiobutton":
-                var_lines.append(f'{name}_var = None')
-            elif w.widget_type == "Scale":
-                var_lines.append(f'{name}_var = None')
-
-        if var_lines:
-            lines.extend(var_lines)
-        else:
-            lines.append('# (No input variables required)')
-            
-        lines.extend([
-            '',
-            'def init(top_root, top_app):',
-            '    """Called before GUI widgets are created."""',
-            '    global root, app',
-            '    root = top_root',
-            '    app = top_app',
-            ''
-        ])
-
-        # Initialize variables inside init()
-        init_var_lines = []
-        for wid in state.widget_order:
-            w = state.widgets.get(wid)
-            if not w:
-                continue
-            name = cls.sanitize_identifier(w.name)
-            if w.widget_type in ("Entry", "Combobox"):
-                default_text = w.properties.get("text", "")
-                init_var_lines.append(f'    global {name}_var')
-                init_var_lines.append(f'    {name}_var = tk.StringVar(value="{default_text}")')
-            elif w.widget_type == "Checkbutton":
-                init_var_lines.append(f'    global {name}_var')
-                init_var_lines.append(f'    {name}_var = tk.BooleanVar(value=False)')
-            elif w.widget_type == "Radiobutton":
-                init_var_lines.append(f'    global {name}_var')
-                init_var_lines.append(f'    {name}_var = tk.StringVar(value="1")')
-            elif w.widget_type == "Scale":
-                init_var_lines.append(f'    global {name}_var')
-                init_var_lines.append(f'    {name}_var = tk.DoubleVar(value=0.0)')
-
-        if init_var_lines:
-            lines.extend(init_var_lines)
-        else:
-            lines.append('    pass')
-
-        lines.extend([
+            delimited_var_block,
             '',
             '# --------------------------------------------------------------------------',
             '# Event Handlers & Callbacks',
             '# --------------------------------------------------------------------------',
-        ])
-
-        # Collect event handler names
-        handlers: Set[Tuple[str, bool]] = set() # (handler_name, is_event_object)
-        for wid in state.widget_order:
-            w = state.widgets.get(wid)
-            if not w:
-                continue
-            for evt, handler in w.events.items():
-                if handler:
-                    is_event = (evt != "command")
-                    handlers.add((handler, is_event))
-
-        if existing_code:
-            # If user already wrote logic in support file, preserve it and only append new handlers
-            new_stubs = []
-            for handler, is_event in sorted(handlers):
-                if f"def {handler}(" not in existing_code:
-                    param = "event" if is_event else ""
-                    new_stubs.extend([
-                        '',
-                        f'def {handler}({param}):',
-                        f'    """Callback handler for {handler}"""',
-                        f'    print("[Callback] {handler} triggered")',
-                        '    # TODO: Implement your application logic here',
-                        '    pass'
-                    ])
-            if new_stubs:
-                return existing_code.rstrip() + "\n" + "\n".join(new_stubs) + "\n"
-            return existing_code
+        ]
 
         if not handlers:
             lines.append('# No callbacks registered')
