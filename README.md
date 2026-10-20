@@ -32,7 +32,7 @@
 
 ---
 
-## ⚡ How to Open (No Terminal Needed!)
+## ⚡ How to Open 
 
 ### 🪟 Windows
 * **Desktop**: Double-click the **PageStudio** shortcut on your Desktop.
